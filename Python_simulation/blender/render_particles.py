@@ -71,6 +71,41 @@ def cubes_from_points(points, half_size=0.005):
     return verts, faces
 
 
+def clear_default_scene() -> None:
+    """Remove Blender's default Cube, Camera, and Light objects."""
+    bpy.ops.object.select_all(action='SELECT')
+    bpy.ops.object.delete(use_global=False)
+
+
+def create_particle_material() -> bpy.types.Material:
+    """Create material for particle cubes with slight transparency."""
+    mat = bpy.data.materials.new(name="ParticleMaterial")
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    bsdf = nodes.get('Principled BSDF')
+    if bsdf:
+        bsdf.inputs['Base Color'].default_value = (0.3, 0.6, 0.9, 1.0)  # Blue
+        bsdf.inputs['Transmission'].default_value = 0.5  # Semi-transparent
+        bsdf.inputs['Roughness'].default_value = 0.2
+        bsdf.inputs['IOR'].default_value = 1.333
+    return mat
+
+
+def create_ground_plane() -> bpy.types.Object:
+    """Create ground plane."""
+    bpy.ops.mesh.primitive_plane_add(size=3, location=(0, 0, 0))
+    ground = bpy.context.active_object
+    ground.name = "Ground"
+    mat = bpy.data.materials.new(name="GroundMaterial")
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get('Principled BSDF')
+    if bsdf:
+        bsdf.inputs['Base Color'].default_value = (0.8, 0.8, 0.8, 1.0)
+        bsdf.inputs['Roughness'].default_value = 0.5
+    ground.data.materials.append(mat)
+    return ground
+
+
 def ensure_camera(camera_settings: dict | None) -> None:
     scene = bpy.context.scene
     cam_obj = next((obj for obj in scene.objects if obj.type == "CAMERA"), None)
@@ -87,26 +122,55 @@ def ensure_camera(camera_settings: dict | None) -> None:
 
 def ensure_light():
     scene = bpy.context.scene
-    if "FluidKeyLight" in bpy.data.objects:
-        return
-    light_data = bpy.data.lights.new(name="FluidKeyLight", type="AREA")
-    light_data.energy = 3000
-    light_obj = bpy.data.objects.new(name="FluidKeyLight", object_data=light_data)
-    light_obj.location = (2.0, 3.0, 2.0)
-    scene.collection.objects.link(light_obj)
+    
+    if "FluidKeyLight" not in bpy.data.objects:
+        key_light = bpy.data.lights.new(name="FluidKeyLight", type="SUN")
+        key_light.energy = 3.0
+        key_obj = bpy.data.objects.new(name="FluidKeyLight", object_data=key_light)
+        key_obj.location = (3.0, 3.0, 4.0)
+        key_obj.rotation_euler = (0.8, 0.2, 1.0)
+        scene.collection.objects.link(key_obj)
+    
+    if "FluidFillLight" not in bpy.data.objects:
+        fill_light = bpy.data.lights.new(name="FluidFillLight", type="AREA")
+        fill_light.energy = 500
+        fill_light.size = 2.0
+        fill_obj = bpy.data.objects.new(name="FluidFillLight", object_data=fill_light)
+        fill_obj.location = (-2.0, 2.0, 1.5)
+        scene.collection.objects.link(fill_obj)
+    
+    world = bpy.data.worlds.get("World")
+    if world:
+        world.use_nodes = True
+        bg = world.node_tree.nodes.get('Background')
+        if bg:
+            bg.inputs['Color'].default_value = (0.5, 0.7, 1.0, 1.0)
+            bg.inputs['Strength'].default_value = 0.8
 
 
 def render_sequence(manifest: dict) -> None:
     scene = bpy.context.scene
+    clear_default_scene()
+    
+    # Setup scene
+    ensure_camera(manifest.get("camera", {}))
+    ensure_light()
+    ground = create_ground_plane()
+    particle_mat = create_particle_material()
+    
+    # Rendering settings
     scene.render.engine = "CYCLES"
-    scene.cycles.samples = 32
+    scene.cycles.samples = 64
+    scene.cycles.use_denoising = True
     scene.render.image_settings.file_format = "PNG"
+    scene.render.resolution_x = 1920
+    scene.render.resolution_y = 1080
+    
     render_dir = Path(manifest["render_dir"])
     render_dir.mkdir(parents=True, exist_ok=True)
     ply_dir = Path(manifest["ply_dir"])
     files = sorted(ply_dir.glob("frame_*.ply"))
-    ensure_camera(manifest.get("camera", {}))
-    ensure_light()
+    
     for frame_idx, ply_path in enumerate(files):
         points = load_particle_positions(ply_path)
         mesh = bpy.data.meshes.new(f"FluidFrame{frame_idx}")
@@ -114,11 +178,15 @@ def render_sequence(manifest: dict) -> None:
         mesh.from_pydata(verts, [], faces)
         mesh.update()
         obj = bpy.data.objects.new("Fluid", mesh)
-        bpy.context.collection.objects.link(obj)
+        obj.data.materials.append(particle_mat)
+        scene.collection.objects.link(obj)
         scene.render.filepath = str(render_dir / f"frame_{frame_idx:05d}.png")
         bpy.ops.render.render(write_still=True)
         bpy.data.objects.remove(obj, do_unlink=True)
         bpy.data.meshes.remove(mesh)
+    
+    # Cleanup
+    bpy.data.objects.remove(ground, do_unlink=True)
 
 
 if __name__ == "__main__":
