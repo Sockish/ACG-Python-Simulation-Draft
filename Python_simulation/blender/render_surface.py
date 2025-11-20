@@ -84,7 +84,7 @@ def ensure_camera(camera_settings: dict | None) -> None:
         cam_obj = bpy.data.objects.new("FluidCamera", camera)
         scene.collection.objects.link(cam_obj)
         camera.lens = 50  # Standard focal length
-    cam_obj.location = camera_settings.get("location", [1.2, 1.0, 0.4])
+    cam_obj.location = camera_settings.get("location", [3.2, 3.0, 3.4])
     look = mathutils.Vector(camera_settings.get("look_at", [0.0, 0.4, 0.0]))
     direction = look - cam_obj.location
     cam_obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()

@@ -20,14 +20,14 @@ class SimulationConfig:
     particle_count: int = 5000
     time_step: float = 0.005
     kernel_radius: float = 0.045
-    mass: float = 0.024
+    mass: float = 0.00024
     rest_density: float = 1000.0
     gas_constant: float = 1000.0
     viscosity: float = 0.001
-    gravity: Tuple[float, float, float] = (0.0, -9.81, 0.0)
+    gravity: Tuple[float, float, float] = (0.0, 0.0, -9.81)
 
-    domain_min: Tuple[float, float, float] = (-0.5, 0.0, -0.5)
-    domain_max: Tuple[float, float, float] = (0.5, 1.0, 0.5)
+    domain_min: Tuple[float, float, float] = (-0.5, -0.5, 0.0)
+    domain_max: Tuple[float, float, float] = (0.5, 0.5, 1.0)
     boundary_damping: float = -0.5
 
     export_every_n_steps: int = 2
@@ -65,13 +65,13 @@ class ScenePreset:
 
 PRESETS = {
     "dam_break": ScenePreset(
-        fluid_block_min=(-0.3, 0.0, -0.3),
-        fluid_block_max=(-0.05, 0.6, 0.3),
+        fluid_block_min=(-0.3, -0.3, 0.0),
+        fluid_block_max=(-0.05, 0.3, 0.6),
     ),
     "drop": ScenePreset(
-        fluid_block_min=(-0.1, 0.4, -0.1),
-        fluid_block_max=(0.1, 0.7, 0.1),
-        obstacle_center=(0.0, 0.05, 0.0),
+        fluid_block_min=(-0.1, -0.1, 0.4),
+        fluid_block_max=(0.1, 0.1, 0.7),
+        obstacle_center=(0.0, 0.0, 0.05),
         obstacle_radius=0.1,
     ),
 }
