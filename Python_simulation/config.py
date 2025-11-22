@@ -114,12 +114,11 @@ PRESETS = {
         obstacle_center=(0.0, 0.0, 0.05),
         obstacle_radius=0.1,
         rigid_bodies=(
-
             RigidMeshPreset(
                 name="CatchBox",
                 mesh_path=Path("assets/rigid/barrier_box.obj"),
-                density=400.0,
-                position=(0.0, 0.0, 0.08),
+                density=400000.0,
+                position=(0.0, 0.0, 1.0),
                 scale=0.5,
             ),
         ),
