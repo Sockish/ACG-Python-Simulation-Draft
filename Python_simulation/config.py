@@ -19,8 +19,8 @@ class SimulationConfig:
 
     particle_count: int = 5000
     time_step: float = 0.005
-    kernel_radius: float = 0.045
-    mass: float = 0.00024
+    kernel_radius: float = 0.065
+    mass: float = 0.024
     rest_density: float = 1000.0
     gas_constant: float = 1000.0
     viscosity: float = 0.001

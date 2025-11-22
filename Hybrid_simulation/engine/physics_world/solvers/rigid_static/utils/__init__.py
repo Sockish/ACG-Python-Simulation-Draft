@@ -1,0 +1,1 @@
+"""Utilities for rigid-static collision response."""

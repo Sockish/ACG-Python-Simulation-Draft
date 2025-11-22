@@ -1,0 +1,32 @@
+# Example scene configuration for the hybrid simulation.
+# Units: length in meters (m), time in seconds (s), mass in kilograms (kg).
+scene_name: sample_scene
+simulation:
+  time_step: 0.005  # s
+  total_steps: 10
+  gravity: [0.0, 0.0, -9.81]  # m/s^2
+liquid_box:
+  min_corner: [-0.3, 0.05, 0.25]  # m
+  max_corner: [0.3, 0.3, 0.45]  # m
+  particle_spacing: 0.05  # m
+  rest_density: 1000.0  # kg/m^3
+  smoothing_length: 0.08  # m
+# rigid_bodies:
+#   - name: rigid_sphere
+#     mesh_path: assets/rigid/sphere.obj
+#     mass: 2.5  # kg
+#     inertia: [1.0, 1.0, 1.0]  # kg·m^2
+#     initial_position: [0.0, 0.0, 0.0]  # m
+#     initial_orientation: [0.0, 0.0, 0.0, 1.0]
+#     initial_linear_velocity: [0.0, 0.0, 0.0]  # m/s
+#     initial_angular_velocity: [0.0, 0.0, 0.0]  # rad/s
+static_bodies:
+  - name: container
+    mesh_path: assets/static/container.obj
+    initial_position: [0.0, 0.0, 0.0]  # m
+    initial_orientation: [0.0, 0.0, 0.0, 1.0]
+export:
+  output_root: outputs
+  fluid_subdir: fluid
+  rigid_subdir: rigid
+  static_subdir: static

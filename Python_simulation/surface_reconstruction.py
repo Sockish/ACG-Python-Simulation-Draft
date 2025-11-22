@@ -1,117 +1,203 @@
-"""Simple surface reconstruction from particle dumps.
+"""Batch wrapper around pysplashsurf reconstruction.
 
-This implementation intentionally stays lightweight and dependency free
-except for the optional scikit-image marching cubes helper. If the
-library is missing we raise a friendly error telling the user how to
-install it.
+This module offers two primary entry points:
+
+- ``reconstruct_sequence`` integrates with ``SimulationRunner`` so the
+  reconstruction stage fits seamlessly into the existing Python pipeline.
+- ``main`` exposes a small CLI so you can invoke the same logic manually,
+  e.g. ``python surface_reconstruction.py output/ply output/mesh``.
+
+Both paths iterate over all ``.ply`` particle caches, call the external
+``pysplashsurf`` tool with consistent parameters, and emit meshes to
+``output/mesh`` (or any folder you choose).
 """
 from __future__ import annotations
 
 import argparse
+import subprocess
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
-import numpy as np
-from tqdm.auto import tqdm
-
-try:
-    from skimage import measure
-except ImportError as exc:  # pragma: no cover - import guard
-    measure = None
-    IMPORT_ERROR = exc
-else:
-    IMPORT_ERROR = None
-
-from config import SimulationConfig
-from kernels import SmoothingKernels
+DEFAULT_PYSPLASHSURF_CMD = "pysplashsurf"
 
 
-def load_ascii_ply(path: Path) -> np.ndarray:
-    """Parse the ASCII ply files produced by io_utils.exporter."""
+@dataclass(frozen=True)
+class SplashSurfParams:
+	"""Parameter bundle mirroring the pysplashsurf CLI options we care about."""
 
-    with path.open("r", encoding="utf-8") as handle:
-        header = []
-        while True:
-            line = handle.readline().strip()
-            header.append(line)
-            if line == "end_header":
-                break
-        count = next(int(x.split()[2]) for x in header if x.startswith("element vertex"))
-        data = np.loadtxt(handle, max_rows=count)
-    return data[:, :3]
+	particle_radius: float = 0.025
+	smoothing_length: float = 2.0
+	cube_size: float = 0.5
+	threshold: float = 0.6
+	mesh_smoothing_weights: str = "on"
+	mesh_smoothing_iters: int = 15
+	normals: str = "on"
+	normals_smoothing_iters: int = 10
 
-
-def build_scalar_field(
-    positions: np.ndarray,
-    config: SimulationConfig,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Accumulate SPH kernels onto a dense grid to approximate a surface."""
-
-    res = config.reconstruction_grid_resolution
-    domain_min = np.asarray(config.domain_min, dtype=np.float32)
-    domain_max = np.asarray(config.domain_max, dtype=np.float32)
-    grid = np.zeros((res, res, res), dtype=np.float32)
-    xs = np.linspace(domain_min[0], domain_max[0], res)
-    ys = np.linspace(domain_min[1], domain_max[1], res)
-    zs = np.linspace(domain_min[2], domain_max[2], res)
-    kernels = SmoothingKernels(config.kernel_radius * config.reconstruction_radius_scale)
-    cell_size = (domain_max - domain_min) / (res - 1)
-    influence_radius = int(
-        np.ceil(config.reconstruction_radius_scale * config.kernel_radius / cell_size.max())
-    )
-    for point in positions:
-        center_idx = ((point - domain_min) / cell_size).astype(int)
-        center_idx = np.clip(center_idx, 0, res - 1)
-        for ix in range(max(center_idx[0] - influence_radius, 0), min(center_idx[0] + influence_radius + 1, res)):
-            for iy in range(max(center_idx[1] - influence_radius, 0), min(center_idx[1] + influence_radius + 1, res)):
-                for iz in range(max(center_idx[2] - influence_radius, 0), min(center_idx[2] + influence_radius + 1, res)):
-                    grid_pt = np.array([xs[ix], ys[iy], zs[iz]])
-                    r = np.linalg.norm(point - grid_pt)
-                    grid[ix, iy, iz] += kernels.poly6(r)
-    return grid, xs, ys, zs
+	def as_cli_args(self) -> list[str]:
+		return [
+			"-r",
+			str(self.particle_radius),
+			"-l",
+			str(self.smoothing_length),
+			"-c",
+			str(self.cube_size),
+			"-t",
+			str(self.threshold),
+			f"--mesh-smoothing-weights={self.mesh_smoothing_weights}",
+			"--mesh-smoothing-iters",
+			str(self.mesh_smoothing_iters),
+			f"--normals={self.normals}",
+			"--normals-smoothing-iters",
+			str(self.normals_smoothing_iters),
+		]
 
 
-def reconstruct_frame(ply_path: Path, output_path: Path, config: SimulationConfig) -> None:
-    if measure is None:  # pragma: no cover - depends on optional dep
-        raise RuntimeError(
-            "scikit-image is required for surface reconstruction. Install it via `pip install scikit-image`"
-        ) from IMPORT_ERROR
-    positions = load_ascii_ply(ply_path)
-    field, xs, ys, zs = build_scalar_field(positions, config)
-    verts, faces, normals, _ = measure.marching_cubes(field, level=np.percentile(field, 60))
-    scale = np.array([
-        xs[-1] - xs[0],
-        ys[-1] - ys[0],
-        zs[-1] - zs[0],
-    ]) / field.shape[0]
-    verts = verts * scale + np.array([xs[0], ys[0], zs[0]])
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as obj:
-        for v in verts:
-            obj.write(f"v {v[0]} {v[1]} {v[2]}\n")
-        for f in faces:
-            obj.write(f"f {int(f[0]) + 1} {int(f[1]) + 1} {int(f[2]) + 1}\n")
+def _discover_ply_frames(ply_dir: Path) -> list[Path]:
+	if not ply_dir.exists():
+		raise FileNotFoundError(f"Missing particle directory: {ply_dir}")
+	return sorted(ply_dir.glob("*.ply"))
 
 
-def reconstruct_sequence(ply_dir: Path, mesh_dir: Path, config: SimulationConfig, limit: int | None = None) -> None:
-    ply_files = sorted(ply_dir.glob("frame_*.ply"))
-    if limit is not None:
-        ply_files = ply_files[:limit]
-    for ply_path in tqdm(ply_files, desc="Reconstructing", unit="frame"):
-        mesh_path = mesh_dir / (ply_path.stem + ".obj")
-        reconstruct_frame(ply_path, mesh_path, config)
+def _build_command(
+	executable: str,
+	input_file: Path,
+	output_file: Path,
+	params: SplashSurfParams,
+) -> list[str]:
+	return [
+		executable,
+		"reconstruct",
+		str(input_file),
+		*params.as_cli_args(),
+		"-o",
+		str(output_file),
+	]
 
 
-def main() -> None:  # pragma: no cover - CLI wrapper
-    parser = argparse.ArgumentParser(description="Reconstruct surfaces from exported SPH frames.")
-    parser.add_argument("input", type=Path, help="Directory with .ply frames")
-    parser.add_argument("output", type=Path, help="Directory to write .obj meshes")
-    parser.add_argument("--grid", type=int, default=64, help="Grid resolution for marching cubes")
-    args = parser.parse_args()
-    config = SimulationConfig(reconstruction_grid_resolution=args.grid)
-    reconstruct_sequence(args.input, args.output, config)
+def _run_command(command: Sequence[str]) -> None:
+	print("[pysplashsurf]", " ".join(command))
+	try:
+		subprocess.run(command, check=True)
+	except FileNotFoundError as exc:
+		raise RuntimeError(
+			f"Could not find '{command[0]}'. Ensure pysplashsurf is installed and on PATH."
+		) from exc
+	except subprocess.CalledProcessError as exc:
+		raise RuntimeError(f"pysplashsurf failed with exit code {exc.returncode}") from exc
 
 
-if __name__ == "__main__":  # pragma: no cover
-    main()
+def reconstruct_sequence(
+	ply_dir: Path | str,
+	mesh_dir: Path | str,
+	config=None,
+	scene_name: str | None = None,
+	rigid_dir: Path | str | None = None,
+	*,
+	pysplashsurf_cmd: str = DEFAULT_PYSPLASHSURF_CMD,
+	params: SplashSurfParams | None = None,
+	overwrite: bool = True,
+	output_suffix: str = "_liquid",
+) -> list[Path]:
+	"""Iterate over every PLY cache and reconstruct a surface mesh.
 
+	Parameters besides ``ply_dir``/``mesh_dir`` match what the simulation
+	pipeline expects, so this function can be called both interactively and
+	from ``SimulationRunner`` without extra glue code.
+	"""
+
+	del config, scene_name, rigid_dir  # Reserved for future integration hooks.
+
+	ply_dir = Path(ply_dir)
+	mesh_dir = Path(mesh_dir)
+	mesh_dir.mkdir(parents=True, exist_ok=True)
+
+	frames = _discover_ply_frames(ply_dir)
+	if not frames:
+		print(f"No PLY frames found in {ply_dir}, skipping reconstruction")
+		return []
+
+	params = params or SplashSurfParams()
+	produced: list[Path] = []
+
+	for index, ply_file in enumerate(frames, start=1):
+		mesh_name = f"{ply_file.stem}{output_suffix}.obj"
+		mesh_path = mesh_dir / mesh_name
+		if mesh_path.exists() and not overwrite:
+			print(f"[{index}/{len(frames)}] Skipping existing {mesh_name}")
+			continue
+
+		print(f"[{index}/{len(frames)}] Reconstructing {ply_file.name} -> {mesh_name}")
+		command = _build_command(pysplashsurf_cmd, ply_file, mesh_path, params)
+		_run_command(command)
+		produced.append(mesh_path)
+
+	return produced
+
+
+def _build_parser() -> argparse.ArgumentParser:
+	parser = argparse.ArgumentParser(description="Batch surface reconstruction via pysplashsurf")
+	parser.add_argument("input_dir", type=Path, help="Directory containing frame_XXXXX.ply files")
+	parser.add_argument("output_dir", type=Path, help="Destination directory for OBJ meshes")
+	parser.add_argument("--pysplashsurf", default=DEFAULT_PYSPLASHSURF_CMD, help="Executable to invoke")
+	parser.add_argument("--radius", "-r", type=float, default=SplashSurfParams().particle_radius)
+	parser.add_argument("--smoothing-length", "-l", type=float, default=SplashSurfParams().smoothing_length)
+	parser.add_argument("--cube-size", "-c", type=float, default=SplashSurfParams().cube_size)
+	parser.add_argument("--threshold", "-t", type=float, default=SplashSurfParams().threshold)
+	parser.add_argument(
+		"--mesh-smoothing-weights",
+		choices=["on", "off"],
+		default=SplashSurfParams().mesh_smoothing_weights,
+	)
+	parser.add_argument(
+		"--mesh-smoothing-iters",
+		type=int,
+		default=SplashSurfParams().mesh_smoothing_iters,
+	)
+	parser.add_argument("--normals", choices=["on", "off"], default=SplashSurfParams().normals)
+	parser.add_argument(
+		"--normals-smoothing-iters",
+		type=int,
+		default=SplashSurfParams().normals_smoothing_iters,
+	)
+	parser.add_argument(
+		"--skip-existing",
+		action="store_true",
+		help="Do not re-run pysplashsurf for meshes that already exist",
+	)
+	parser.add_argument(
+		"--suffix",
+		default="_liquid",
+		help="Suffix appended to frame_XXXXX when naming OBJ files (default: _liquid)",
+	)
+	return parser
+
+
+def main(argv: Iterable[str] | None = None) -> None:
+	parser = _build_parser()
+	args = parser.parse_args(list(argv) if argv is not None else None)
+
+	params = SplashSurfParams(
+		particle_radius=args.radius,
+		smoothing_length=args.smoothing_length,
+		cube_size=args.cube_size,
+		threshold=args.threshold,
+		mesh_smoothing_weights=args.mesh_smoothing_weights,
+		mesh_smoothing_iters=args.mesh_smoothing_iters,
+		normals=args.normals,
+		normals_smoothing_iters=args.normals_smoothing_iters,
+	)
+
+	reconstruct_sequence(
+		args.input_dir,
+		args.output_dir,
+		pysplashsurf_cmd=args.pysplashsurf,
+		params=params,
+		overwrite=not args.skip_existing,
+		output_suffix=args.suffix,
+	)
+
+
+if __name__ == "__main__":
+	main()
