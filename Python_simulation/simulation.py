@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Optional
 
 from config import SimulationConfig
-from io_utils.exporter import write_manifest, write_particles_ply
+from io_utils.exporter import write_manifest, write_particles_ply, write_rigid_transforms
 from pipeline.blender_bridge import launch_blender
-from sph_solver import SPHSolver
 from surface_reconstruction import reconstruct_sequence
+from hybrid.simulation import HybridSimulator
 
 
 @dataclass
@@ -25,14 +25,15 @@ class SimulationRunner:
     def __init__(self, config: SimulationConfig, options: RunOptions) -> None:
         self.config = config
         self.options = options
-        self.solver = SPHSolver(config, options.scene)
+        self.solver = HybridSimulator(config, options.scene)
         self.exported_frames = 0
 
     def _export_frame(self, step_idx: int) -> None:
         if not self.options.export_particles:
             return
         frame_idx = self.exported_frames
-        write_particles_ply(frame_idx, self.solver.particles, self.config.ply_dir)
+        write_particles_ply(frame_idx, self.solver.fluid, self.config.ply_dir)
+        write_rigid_transforms(frame_idx, self.solver.rigid_world, self.config.rigid_dir)
         self.exported_frames += 1
 
     def run(self) -> None:
@@ -41,7 +42,13 @@ class SimulationRunner:
 
         self.solver.run(callback)
         if self.options.reconstruct_surface:
-            reconstruct_sequence(self.config.ply_dir, self.config.mesh_dir, self.config)
+            reconstruct_sequence(
+                self.config.ply_dir,
+                self.config.mesh_dir,
+                self.config,
+                self.options.scene,
+                self.config.rigid_dir,
+            )
         if self.options.render_with_blender:
             self.render_with_blender()
 
@@ -52,6 +59,7 @@ class SimulationRunner:
             total_frames=self.exported_frames,
             ply_dir=self.config.ply_dir,
             mesh_dir=self.config.mesh_dir if self.options.render_surface else None,
+            rigid_dir=self.config.rigid_dir,
             render_dir=self.config.render_dir,
         )
         script = (

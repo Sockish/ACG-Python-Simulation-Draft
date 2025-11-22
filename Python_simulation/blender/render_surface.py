@@ -58,6 +58,17 @@ def create_water_material() -> bpy.types.Material:
     return mat
 
 
+def create_solid_material() -> bpy.types.Material:
+    mat = bpy.data.materials.new(name="RigidMaterial")
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get('Principled BSDF')
+    if bsdf:
+        bsdf.inputs['Base Color'].default_value = (0.6, 0.55, 0.5, 1.0)
+        bsdf.inputs['Metallic'].default_value = 0.2
+        bsdf.inputs['Roughness'].default_value = 0.6
+    return mat
+
+
 def create_ground_plane() -> bpy.types.Object:
     """Create a simple ground plane for visual reference."""
     bpy.ops.mesh.primitive_plane_add(size=3, location=(0, 0, 0))
@@ -137,6 +148,7 @@ def render_sequence(manifest: dict) -> None:
     ensure_light()
     ground = create_ground_plane()
     water_mat = create_water_material()
+    solid_mat = create_solid_material()
     
     # Rendering settings
     scene.render.engine = "CYCLES"
@@ -162,34 +174,50 @@ def render_sequence(manifest: dict) -> None:
     scene.render.resolution_y = 720
     scene.render.film_transparent = False  # Solid background
     
-    mesh_files = sorted(mesh_dir.glob("frame_*.obj"))
-    print(f"Found {len(mesh_files)} mesh files to render")
-    
-    for frame_idx, mesh_path in enumerate(mesh_files):
-        verts, faces = load_obj(mesh_path)
-        print(f"Frame {frame_idx}: {len(verts)} vertices, {len(faces)} faces")
-        
-        if len(verts) == 0 or len(faces) == 0:
-            print(f"WARNING: Empty mesh at frame {frame_idx}, skipping")
+    total_frames = manifest.get("total_frames", 0)
+    for frame_idx in range(total_frames):
+        liquid_path = mesh_dir / f"frame_{frame_idx:05d}_liquid.obj"
+        solid_path = mesh_dir / f"frame_{frame_idx:05d}_solid.obj"
+
+        objects_spawned = []
+
+        if liquid_path.exists():
+            verts, faces = load_obj(liquid_path)
+            if verts and faces:
+                mesh = bpy.data.meshes.new(f"LiquidMesh{frame_idx}")
+                mesh.from_pydata(verts, [], faces)
+                mesh.update()
+                obj = bpy.data.objects.new(f"LiquidMesh{frame_idx}", mesh)
+                obj.data.materials.append(water_mat)
+                scene.collection.objects.link(obj)
+                bpy.context.view_layer.objects.active = obj
+                bpy.ops.object.shade_smooth()
+                objects_spawned.append(obj)
+
+        if solid_path.exists():
+            verts, faces = load_obj(solid_path)
+            if verts and faces:
+                mesh = bpy.data.meshes.new(f"SolidMesh{frame_idx}")
+                mesh.from_pydata(verts, [], faces)
+                mesh.update()
+                obj = bpy.data.objects.new(f"SolidMesh{frame_idx}", mesh)
+                obj.data.materials.append(solid_mat)
+                scene.collection.objects.link(obj)
+                bpy.context.view_layer.objects.active = obj
+                bpy.ops.object.shade_smooth()
+                objects_spawned.append(obj)
+
+        if not objects_spawned:
+            print(f"WARNING: No meshes found for frame {frame_idx}")
             continue
-            
-        mesh = bpy.data.meshes.new(f"FluidMesh{frame_idx}")
-        mesh.from_pydata(verts, [], faces)
-        mesh.update()
-        
-        obj = bpy.data.objects.new("FluidMesh", mesh)
-        obj.data.materials.append(water_mat)  # Apply water material
-        scene.collection.objects.link(obj)
-        
-        # Enable smooth shading for better appearance
-        bpy.context.view_layer.objects.active = obj
-        bpy.ops.object.shade_smooth()
-        
+
         scene.render.filepath = str(render_dir / f"frame_{frame_idx:05d}.png")
         bpy.ops.render.render(write_still=True)
-        
-        bpy.data.objects.remove(obj, do_unlink=True)
-        bpy.data.meshes.remove(mesh)
+
+        for obj in objects_spawned:
+            mesh = obj.data
+            bpy.data.objects.remove(obj, do_unlink=True)
+            bpy.data.meshes.remove(mesh, do_unlink=True)
     
     # Cleanup
     bpy.data.objects.remove(ground, do_unlink=True)

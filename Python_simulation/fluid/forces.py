@@ -4,8 +4,8 @@ from __future__ import annotations
 import numpy as np
 
 from config import SimulationConfig
-from kernels import SmoothingKernels
-from particles import ParticleSystem
+from fluid.kernels import SmoothingKernels
+from fluid.particles import ParticleSystem
 
 
 def compute_density_pressure(
@@ -57,4 +57,3 @@ def compute_forces(
             viscosity_force += config.viscosity * config.mass * (vj - vi) * visc / particles.densities[j]
 
         particles.forces[i] = pressure_force + viscosity_force + gravity * particles.densities[i]
-

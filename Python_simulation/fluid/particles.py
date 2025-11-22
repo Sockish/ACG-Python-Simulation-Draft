@@ -1,7 +1,7 @@
-"""Particle containers and neighbor search utilities."""
+"""Fluid particle containers and neighbor search utilities."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Tuple
 
 import numpy as np
@@ -12,7 +12,7 @@ class ParticleSystem:
     """Stores all per-particle properties as NumPy arrays for vector ops."""
 
     count: int
-    mass: float
+    _seed_cursor: int = field(init=False, default=0)
 
     def __post_init__(self) -> None:
         self.positions = np.zeros((self.count, 3), dtype=np.float32)
@@ -27,18 +27,37 @@ class ParticleSystem:
         block_min: Tuple[float, float, float],
         block_max: Tuple[float, float, float],
         jitter: float = 0.002,
-    ) -> None:
-        lin = np.linspace(0.0, 1.0, int(round(self.count ** (1 / 3))) + 2)
-        grid = np.array(np.meshgrid(lin, lin, lin)).T.reshape(-1, 3)
-        rng = np.random.default_rng(42)
+        max_particles: int | None = None,
+    ) -> int:
+        """Fill particle positions within a block, optionally capping the count."""
+
+        remaining = self.count - self._seed_cursor
+        if remaining <= 0:
+            return 0
+        target = remaining if max_particles is None else min(remaining, max_particles)
+        if target <= 0:
+            return 0
+        axis_samples = int(np.ceil(target ** (1 / 3))) + 2
+        lin = np.linspace(0.0, 1.0, axis_samples)
+        grid = np.stack(np.meshgrid(lin, lin, lin, indexing="ij"), axis=-1).reshape(-1, 3)
         span = np.array(block_max) - np.array(block_min)
         pts = np.array(block_min) + grid * span
-        pts = pts[: self.count]
-        pts += rng.uniform(-jitter, jitter, size=pts.shape)
-        self.positions[: len(pts)] = pts
+        pts = pts[:target]
+        rng = np.random.default_rng()
+        if pts.size:
+            pts += rng.uniform(-jitter, jitter, size=pts.shape)
+        start = self._seed_cursor
+        end = start + len(pts)
+        self.positions[start:end] = pts
+        self._seed_cursor = end
+        return len(pts)
 
     def reset_forces(self) -> None:
         self.forces.fill(0.0)
+
+    @property
+    def seeded_count(self) -> int:
+        return self._seed_cursor
 
 
 class SpatialHash:
@@ -66,4 +85,3 @@ class SpatialHash:
                     key = (base[0] + dx, base[1] + dy, base[2] + dz)
                     if key in self.cells:
                         yield from self.cells[key]
-

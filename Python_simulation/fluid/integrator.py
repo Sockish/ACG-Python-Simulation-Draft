@@ -1,10 +1,8 @@
-"""Time integration routines."""
+"""Time integration routines for the fluid phase."""
 from __future__ import annotations
 
-import numpy as np
-
 from config import SimulationConfig
-from particles import ParticleSystem
+from fluid.particles import ParticleSystem
 
 
 def integrate(particles: ParticleSystem, config: SimulationConfig, dt: float | None = None) -> None:
@@ -14,4 +12,3 @@ def integrate(particles: ParticleSystem, config: SimulationConfig, dt: float | N
     accelerations = particles.forces / particles.densities[:, None]
     particles.velocities += step * accelerations
     particles.positions += step * particles.velocities
-

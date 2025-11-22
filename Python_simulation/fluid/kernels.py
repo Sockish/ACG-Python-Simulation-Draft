@@ -20,6 +20,16 @@ class SmoothingKernels:
         diff = self.h2 - r * r
         return self.poly6_const * diff * diff * diff
 
+    def poly6_array(self, r: np.ndarray) -> np.ndarray:
+        r = np.asarray(r)
+        result = np.zeros_like(r, dtype=np.float32)
+        mask = r < self.h
+        if not np.any(mask):
+            return result
+        diff = self.h2 - r[mask] * r[mask]
+        result[mask] = self.poly6_const * diff * diff * diff
+        return result
+
     def spiky_gradient(self, r_vec: np.ndarray) -> np.ndarray:
         r = np.linalg.norm(r_vec)
         if r == 0.0 or r >= self.h:
@@ -31,4 +41,3 @@ class SmoothingKernels:
         if r >= self.h:
             return 0.0
         return self.visc_const * (self.h - r)
-
