@@ -70,9 +70,37 @@ def mesh_bounds(path: Path) -> Tuple[Vec3, Vec3]:
     mesh = load_obj_mesh(path)
     return mesh.bounds()
 
-
 def bounding_radius(bounds_min: Vec3, bounds_max: Vec3) -> float:
     dx = bounds_max[0] - bounds_min[0]
     dy = bounds_max[1] - bounds_min[1]
     dz = bounds_max[2] - bounds_min[2]
     return 0.5 * sqrt(dx * dx + dy * dy + dz * dz)
+
+
+def compute_center_of_mass(vertices: List[Vec3]) -> Vec3:
+    """Compute the geometric center (centroid) of mesh vertices.
+    
+    Assumes uniform density throughout the mesh.
+    For complex shapes, this is an approximation.
+    """
+    if not vertices:
+        return (0.0, 0.0, 0.0)
+    
+    sum_x = sum(v[0] for v in vertices)
+    sum_y = sum(v[1] for v in vertices)
+    sum_z = sum(v[2] for v in vertices)
+    count = len(vertices)
+    
+    return (sum_x / count, sum_y / count, sum_z / count)
+
+
+def center_mesh_vertices(vertices: List[Vec3], center: Vec3) -> List[Vec3]:
+    """Translate all vertices so that the given center becomes the origin.
+    
+    Returns vertices in center-relative coordinates.
+    """
+    return [
+        (v[0] - center[0], v[1] - center[1], v[2] - center[2])
+        for v in vertices
+    ]
+

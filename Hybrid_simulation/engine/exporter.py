@@ -49,16 +49,21 @@ class SimulationExporter:
         (self.output_root / self.static_dirname).mkdir(parents=True, exist_ok=True)
 
     def export_step(self, step_index: int, snapshot: WorldSnapshot) -> None:
-        fluid_path = self.output_root / self.fluid_dirname / f"fluid_{step_index:05d}.ply"
         rigid_path = self.output_root / self.rigid_dirname / f"rigid_{step_index:05d}.obj"
         static_path = self.output_root / self.static_dirname / f"static_{step_index:05d}.obj"
 
-        self._write_fluid_ply(fluid_path, snapshot)
+        # Only export fluid if it exists
+        if snapshot.fluids is not None:
+            fluid_path = self.output_root / self.fluid_dirname / f"fluid_{step_index:05d}.ply"
+            self._write_fluid_ply(fluid_path, snapshot)
+        
         self._write_obj(rigid_path, snapshot.rigids)
         self._write_obj(static_path, snapshot.statics)
 
     def _write_fluid_ply(self, path: Path, snapshot: WorldSnapshot) -> None:
         fluid = snapshot.fluids
+        if fluid is None:
+            return
         count = fluid.particle_count()
         with path.open("w", encoding="utf-8") as handle:
             handle.write("ply\n")
@@ -81,17 +86,26 @@ class SimulationExporter:
             for body in bodies:
                 mesh = self._get_mesh(body.mesh_path)
                 rotation = quaternion_to_matrix(body.orientation)
-                transformed = [transform_point(v, rotation, body.position) for v in mesh.vertices]
+                
+                # RigidBody: use centered_vertices; StaticBody: use original vertices
+                if hasattr(body, 'centered_vertices'):
+                    # Rigid body - transform centered vertices
+                    transformed = [transform_point(v, rotation, body.position) for v in body.centered_vertices]
+                else:
+                    # Static body - use absolute coordinates from OBJ
+                    transformed = mesh.vertices
+                
                 handle.write(f"o {body.name}\n")
                 for vx, vy, vz in transformed:
                     handle.write(f"v {vx:.6f} {vy:.6f} {vz:.6f}\n")
+                
                 for face in mesh.faces:
                     if len(face) < 3:
                         continue
                     for tri in self._triangulate(face):
                         indices = [str(idx + 1 + vertex_offset) for idx in tri]
                         handle.write(f"f {' '.join(indices)}\n")
-                vertex_offset += len(mesh.vertices)
+                vertex_offset += len(transformed)
 
     def _triangulate(self, face: Sequence[int]) -> Iterable[Sequence[int]]:
         if len(face) == 3:

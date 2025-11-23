@@ -102,7 +102,11 @@ def load_scene_config(config_path: str | Path) -> SceneConfig:
     base_dir = path.parent
 
     simulation = SimulationConfig(**raw["simulation"])
-    liquid_box = LiquidBoxConfig(**raw["liquid_box"])
+    if raw.get("liquid_box"):
+        liquid_box = LiquidBoxConfig(**raw["liquid_box"])
+    else:
+        print("Warning: No liquid box configuration found, will use no fluid simulation.")
+        liquid_box = None
 
     rigid_bodies = [
         RigidBodyConfig(

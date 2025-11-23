@@ -139,24 +139,5 @@ class FluidSolver:
                 print(f"Particle {i} acceleration: {acceleration}, velocity before damping: {velocity}")
             velocity = mul(velocity, 1.0 - self.damping * dt)
             position = add(state.positions[i], mul(velocity, dt))
-            position, velocity = self._enforce_container(position, velocity, state)
             state.velocities[i] = velocity
             state.positions[i] = position
-
-    def _enforce_container(self, position: Vec3, velocity: Vec3, state: FluidState) -> tuple[Vec3, Vec3]:
-        px, py, pz = position
-        vx, vy, vz = velocity
-        min_b = state.bounds_min
-        max_b = state.bounds_max
-        margin = state.smoothing_length * 0.5
-
-        def bounce(axis_value, axis_velocity, min_val, max_val):
-            clamped = clamp(axis_value, min_val + margin, max_val - margin)
-            if clamped != axis_value:
-                axis_velocity *= -0.5
-            return clamped, axis_velocity
-
-        px, vx = bounce(px, vx, min_b[0], max_b[0])
-        py, vy = bounce(py, vy, min_b[1], max_b[1])
-        pz, vz = bounce(pz, vz, min_b[2], max_b[2])
-        return (px, py, pz), (vx, vy, vz)

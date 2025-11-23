@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
+
+# Add parent directory to path to find engine module
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from engine import WorldContainer
 

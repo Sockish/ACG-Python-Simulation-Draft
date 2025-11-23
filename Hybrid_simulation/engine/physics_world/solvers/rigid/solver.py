@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from typing import List
 
 from ....configuration import RigidBodyConfig
-from ....mesh_utils import bounding_radius, mesh_bounds
-from ...math_utils import Vec3, add, clamp, mul
+from ....mesh_utils import mesh_bounds, load_obj_mesh, compute_center_of_mass, center_mesh_vertices
+from ...math_utils import Vec3, add, mul, integrate_quaternion
 from ...state import RigidBodyState
 
 
@@ -19,54 +19,74 @@ def _vec(values) -> Vec3:
 class RigidBodySolver:
     rigid_configs: List[RigidBodyConfig]
     gravity: Vec3  # m/s^2
-    bounds_min: Vec3  # m
-    bounds_max: Vec3  # m
     linear_damping: float = 0.01  # dimensionless per-second damping
+    angular_damping: float = 0.05  # dimensionless per-second angular damping
 
     def initialize(self) -> List[RigidBodyState]:
         states: List[RigidBodyState] = []
         for cfg in self.rigid_configs:
-            local_min, local_max = mesh_bounds(cfg.mesh_path)
-            radius = bounding_radius(local_min, local_max)
+            # Load mesh and compute geometric center
+            mesh = load_obj_mesh(cfg.mesh_path)
+            center = compute_center_of_mass(mesh.vertices)
+            
+            # Center the mesh vertices around the center of mass
+            centered_verts = center_mesh_vertices(mesh.vertices, center)
+            
+            # Compute bounds in centered coordinates
+            centered_mesh = type(mesh)(vertices=centered_verts, faces=mesh.faces)
+            local_min, local_max = centered_mesh.bounds()
+            
+            print(f"Initialized rigid body '{cfg.name}'")
+            print(f"  Local center of mass: ({center[0]:.3f}, {center[1]:.3f}, {center[2]:.3f})")
+            print(f"  World position (CoM): ({cfg.initial_position[0]:.3f}, {cfg.initial_position[1]:.3f}, {cfg.initial_position[2]:.3f})")
+            
             states.append(
                 RigidBodyState(
                     name=cfg.name,
                     mesh_path=cfg.mesh_path,
                     mass=cfg.mass,
                     inertia=tuple(cfg.inertia),
-                    position=_vec(cfg.initial_position),
+                    position=_vec(cfg.initial_position),  # This is now the world-space CoM
                     orientation=tuple(cfg.initial_orientation),
                     linear_velocity=_vec(cfg.initial_linear_velocity),
                     angular_velocity=_vec(cfg.initial_angular_velocity),
-                    bounding_radius=radius,
+                    bounding_radius=0.0,  # No longer used for collision detection
                     local_bounds_min=local_min,
                     local_bounds_max=local_max,
+                    center_of_mass=center,
+                    centered_vertices=centered_verts,
                 )
             )
         return states
 
     def step(self, states: List[RigidBodyState], dt: float) -> None:
+        """Update rigid body states using semi-implicit Euler integration."""
         for state in states:
-            acceleration = self.gravity if state.mass > 0 else (0.0, 0.0, 0.0)
-            velocity = add(state.linear_velocity, mul(acceleration, dt))
-            velocity = mul(velocity, 1.0 - self.linear_damping * dt)
+            # Linear dynamics
+            if state.mass > 0:
+                # Apply gravity
+                linear_acceleration = self.gravity
+                # Update velocity: v = v + a*dt
+                velocity = add(state.linear_velocity, mul(linear_acceleration, dt))
+                # Apply linear damping: v = v * (1 - damping*dt)
+                velocity = mul(velocity, 1.0 - self.linear_damping * dt)
+            else:
+                # Static/kinematic object (infinite mass)
+                velocity = state.linear_velocity
+            
+            # Update position: p = p + v*dt
             position = add(state.position, mul(velocity, dt))
-            position, velocity = self._enforce_bounds(state, position, velocity)
+            
+            # Angular dynamics
+            # Apply angular damping: ω = ω * (1 - damping*dt)
+            angular_velocity = mul(state.angular_velocity, 1.0 - self.angular_damping * dt)
+            
+            # Update orientation using quaternion integration
+            # q(t+dt) = q(t) + dt * 0.5 * [ω] * q(t)
+            orientation = integrate_quaternion(state.orientation, angular_velocity, dt)
+            
+            # Update state
             state.position = position
             state.linear_velocity = velocity
-
-    def _enforce_bounds(self, state: RigidBodyState, position: Vec3, velocity: Vec3) -> tuple[Vec3, Vec3]:
-        px, py, pz = position
-        vx, vy, vz = velocity
-        radius = state.bounding_radius
-
-        def bounce(axis_value, axis_velocity, min_val, max_val):
-            clamped = clamp(axis_value, min_val + radius, max_val - radius)
-            if clamped != axis_value:
-                axis_velocity *= -0.4
-            return clamped, axis_velocity
-
-        px, vx = bounce(px, vx, self.bounds_min[0], self.bounds_max[0])
-        py, vy = bounce(py, vy, self.bounds_min[1], self.bounds_max[1])
-        pz, vz = bounce(pz, vz, self.bounds_min[2], self.bounds_max[2])
-        return (px, py, pz), (vx, vy, vz)
+            state.angular_velocity = angular_velocity
+            state.orientation = orientation
