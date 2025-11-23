@@ -5,11 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Tuple
 
-from ....mesh_utils import load_obj_mesh, OBJMesh
 from ...math_utils import (
     Vec3, add, aabb_intersects_aabb, aabb_normal_at_point, closest_point_on_aabb,
     cross, distance_to_aabb, dot, length, mul, normalize, point_in_aabb, 
-    quaternion_to_matrix, sub, transform_point
+    quaternion_to_matrix, sub
 )
 from ...state import RigidBodyState, StaticBodyState
 
@@ -25,14 +24,21 @@ class ContactPoint:
 
 @dataclass
 class RigidStaticSolver:
-    restitution: float = 0.4  # Coefficient of restitution
+    restitution: float = 0.5  # Coefficient of restitution
     friction: float = 0.3  # Coefficient of friction
+    rolling_resistance_coefficient: float = 0.15  # Rolling resistance coefficient (increased for faster decay)
     use_broadphase: bool = True  # Use AABB broadphase culling
     max_contacts_per_pair: int = 4  # Maximum contact points to process per collision pair
+    max_position_iterations: int = 10  # Maximum iterations to eliminate penetration
+    baumgarte_factor: float = 0.7  # Position correction strength (aggressive)
+    penetration_tolerance: float = 0.0001  # Stop when penetration below this (0.1mm)
+    velocity_threshold: float = 0.1  # Velocity below which to apply resting contact (m/s)
+    max_penetration_correction: float = 0.5  # Maximum position correction per iteration (m)
+    gravity_compensation: bool = True  # Apply support force to counteract gravity
+    resting_angular_threshold: float = 0.001  # Angular velocity threshold for damping (rad/s)
 
     def step(self, rigids: List[RigidBodyState], statics: List[StaticBodyState], dt: float) -> None:
         """Detect and resolve collisions between rigid and static bodies."""
-        del dt
         if not rigids or not statics:
             return
         
@@ -76,22 +82,56 @@ class RigidStaticSolver:
                 if not contacts:
                     continue
                 
-                # Resolve collisions using the detected contact points
-                self._resolve_contacts(rigid, contacts)
+                print(f"Initial collision: {len(contacts)} contacts, point: {contacts[0].position} all penetrations: {[c.penetration for c in contacts]}")
+                
+                # Iteratively resolve position penetration until eliminated
+                iteration = 0
+                max_penetration = max(c.penetration for c in contacts)
+                
+                while max_penetration > self.penetration_tolerance and iteration < self.max_position_iterations:
+                    # Resolve collisions using the detected contact points
+                    self._resolve_contacts(rigid, contacts)
+                    
+                    # Re-compute rotation matrix and world vertices after position correction
+                    rotation_matrix = quaternion_to_matrix(rigid.orientation)
+                    world_vertices = rigid.get_world_vertices()
+                    contacts = self._detect_contacts(world_vertices, rigid.centered_vertices,
+                                                    rigid.position, rotation_matrix, static)
+                    
+                    if not contacts:
+                        print(f"  No contacts after iteration {iteration}, breaking")
+                        break
+                    
+                    max_penetration = max(c.penetration for c in contacts)
+                    iteration += 1
+                print(f"Resolved collision after {iteration} iterations, remaining max penetration: {max_penetration:.6f}m")
+                
+                # Apply rolling resistance when in contact with ground
+                self._apply_rolling_resistance(rigid, contacts, dt)
+                print(f"Resolved collision after {iteration} iterations, remaining max penetration: {max_penetration:.6f}m")
+                
     
     def _detect_contacts(self, world_vertices: List[Vec3], local_vertices: List[Vec3],
                         rigid_position: Vec3, rotation_matrix: Tuple[Vec3, Vec3, Vec3],
                         static: StaticBodyState) -> List[ContactPoint]:
-        """Detect contact points between rigid body vertices and static AABB."""
+        """Detect contact points between rigid body vertices and static AABB.
+        
+        Args:
+            use_prediction: If True, detect contacts with a larger threshold to catch
+                          approaching vertices. If False, only detect actual penetrations.
+        """
         contacts: List[ContactPoint] = []
         bounds_min, bounds_max = static.world_bounds
+        
+        # Set threshold based on mode
+        contact_threshold = 0.0000  # Strict penetration threshold (0.0m)
         
         for world_vert, local_vert in zip(world_vertices, local_vertices):
             # Check if vertex is inside or very close to static AABB
             signed_distance = distance_to_aabb(world_vert, bounds_min, bounds_max)
             
             # Only process penetrating or touching vertices
-            if signed_distance < 0.01:  # Small threshold for contact
+            if signed_distance < contact_threshold:
                 # Get contact point (closest point on AABB)
                 contact_pos = closest_point_on_aabb(world_vert, bounds_min, bounds_max)
                 
@@ -99,7 +139,7 @@ class RigidStaticSolver:
                 normal = aabb_normal_at_point(contact_pos, bounds_min, bounds_max)
                 
                 # Calculate penetration depth (negative distance = penetration)
-                penetration = max(0.0, -signed_distance)
+                penetration = -signed_distance
                 
                 contacts.append(ContactPoint(
                     position=contact_pos,
@@ -130,9 +170,13 @@ class RigidStaticSolver:
         )
         avg_normal = normalize(avg_normal)
         
-        # Position correction: push rigid body out
-        if avg_penetration > 1e-6:
-            correction = mul(avg_normal, avg_penetration + 1e-4)
+        # Position correction: aggressively eliminate all penetration
+        # Use high baumgarte factor to quickly resolve penetration
+        if avg_penetration > self.penetration_tolerance:
+            # Apply aggressive correction clamped to maximum
+            correction_amount = min(avg_penetration * self.baumgarte_factor, 
+                                   self.max_penetration_correction)
+            correction = mul(avg_normal, correction_amount)
             rigid.position = add(rigid.position, correction)
         
         # Compute average inertia
@@ -152,15 +196,17 @@ class RigidStaticSolver:
             # Relative velocity along normal
             v_n = dot(v_contact, contact.normal)
             
-            # Only resolve if moving into surface
-            if v_n >= 0:
-                continue
-            
             # Calculate normal impulse
             r_cross_n = cross(r, contact.normal)
             angular_factor = inv_I * dot(r_cross_n, r_cross_n)
             denominator = inv_mass + angular_factor
-            j_n = -(1.0 + self.restitution) * v_n / max(denominator, 1e-6)
+            
+            effective_restitution = self.restitution
+            j_n = -(1.0 + effective_restitution) * v_n / max(denominator, 1e-6)
+            
+            # Clamp to ensure impulse is at least slightly repulsive
+            # Allow very small negative for numerical stability, but mainly push outward （since here may v_n be slightly negative, meaning it's going out now but haven't done yet!）
+            j_n = max(j_n, 0.0)
             
             # Apply normal impulse
             impulse_n = mul(contact.normal, j_n)
@@ -197,3 +243,64 @@ class RigidStaticSolver:
                 torque_t = cross(r, impulse_t)
                 angular_impulse_t = mul(torque_t, inv_I)
                 rigid.angular_velocity = add(rigid.angular_velocity, angular_impulse_t)
+    
+    def _apply_rolling_resistance(self, rigid: RigidBodyState, contacts: List[ContactPoint], dt: float) -> None:
+        """Apply rolling resistance torque to simulate energy loss during rolling.
+        
+        Rolling resistance opposes the angular velocity and is proportional to the normal force.
+        This simulates deformation, surface irregularities, and material hysteresis.
+        """
+        if not contacts:
+            return
+        
+        # Calculate average normal force magnitude from contacts, may used to do mg's projection
+        # Approximate normal force from weight component
+        avg_normal = (
+            sum(c.normal[0] for c in contacts) / len(contacts),
+            sum(c.normal[1] for c in contacts) / len(contacts),
+            sum(c.normal[2] for c in contacts) / len(contacts),
+        )
+        
+        # Normal force magnitude (approximate from gravity)
+        # F_n ≈ m * g (assuming object is resting on surface)
+        normal_force = rigid.mass * 9.81  # Approximate normal force
+        
+        # Rolling resistance torque magnitude: τ_r = C_rr * F_n * r
+        # where C_rr is rolling resistance coefficient, r is contact radius
+        # For simplicity, use average distance from CoM to contact points
+        avg_contact_distance = 0.0
+        for contact in contacts:
+            r = sub(contact.position, rigid.position)
+            avg_contact_distance += length(r)
+        avg_contact_distance /= len(contacts)
+        
+        # Rolling resistance torque magnitude
+        rolling_torque_magnitude = self.rolling_resistance_coefficient * normal_force * avg_contact_distance
+        
+        # Direction: opposite to angular velocity
+        angular_speed = length(rigid.angular_velocity)
+        if angular_speed > 1e-6:
+            # Torque opposes rotation
+            torque_direction = mul(rigid.angular_velocity, -1.0 / angular_speed)
+            rolling_torque = mul(torque_direction, rolling_torque_magnitude)
+            
+            # Compute angular deceleration: α = τ / I
+            I_avg = sum(rigid.inertia) / 3.0
+            angular_deceleration = mul(rolling_torque, 1.0 / max(I_avg, 1e-6))
+            
+            # Update angular velocity: ω = ω + α * dt
+            new_angular_velocity = add(rigid.angular_velocity, mul(angular_deceleration, dt))
+            
+            # Check if we would reverse direction (overdamping)
+            new_speed = length(new_angular_velocity)
+            dot_product = dot(rigid.angular_velocity, new_angular_velocity)
+            
+            if dot_product < 0 or new_speed < self.resting_angular_threshold:
+                # Would reverse or too slow - stop rotation completely
+                rigid.angular_velocity = (0.0, 0.0, 0.0)
+                print(f"Rolling resistance stopped rotation: old speed={angular_speed:.4f} rad/s → 0")
+            else:
+                rigid.angular_velocity = new_angular_velocity
+                new_speed_actual = length(rigid.angular_velocity)
+                reduction_percent = (angular_speed - new_speed_actual) / angular_speed * 100
+                print(f"Rolling resistance: torque_mag={rolling_torque_magnitude:.4f} N·m, speed: {angular_speed:.4f} → {new_speed_actual:.4f} rad/s ({reduction_percent:.1f}% reduction)")

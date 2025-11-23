@@ -174,16 +174,28 @@ def point_in_aabb(point: Vec3, bounds_min: Vec3, bounds_max: Vec3) -> bool:
 def distance_to_aabb(point: Vec3, bounds_min: Vec3, bounds_max: Vec3) -> float:
     """Calculate signed distance from point to AABB surface.
     
-    Negative if inside, positive if outside.
-    """
-    # Compute closest point on AABB
-    closest = closest_point_on_aabb(point, bounds_min, bounds_max)
-    dist = length(sub(point, closest))
+    Negative if inside (penetration depth), positive if outside.
     
+    For points inside AABB, returns the negative distance to the closest face
+    (the minimum penetration depth needed to exit).
+    """
     # Check if inside
     if point_in_aabb(point, bounds_min, bounds_max):
-        return -dist
-    return dist
+        # Calculate distance to each face
+        distances = [
+            point[0] - bounds_min[0],  # Distance to -X face
+            bounds_max[0] - point[0],  # Distance to +X face
+            point[1] - bounds_min[1],  # Distance to -Y face
+            bounds_max[1] - point[1],  # Distance to +Y face
+            point[2] - bounds_min[2],  # Distance to -Z face
+            bounds_max[2] - point[2],  # Distance to +Z face
+        ]
+        # Return negative of the minimum distance (penetration depth)
+        return -min(distances)
+    
+    # Point is outside: compute closest point on AABB
+    closest = closest_point_on_aabb(point, bounds_min, bounds_max)
+    return length(sub(point, closest))
 
 
 def aabb_normal_at_point(point: Vec3, bounds_min: Vec3, bounds_max: Vec3, epsilon: float = 1e-4) -> Vec3:

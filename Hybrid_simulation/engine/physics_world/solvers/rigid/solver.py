@@ -20,7 +20,7 @@ class RigidBodySolver:
     rigid_configs: List[RigidBodyConfig]
     gravity: Vec3  # m/s^2
     linear_damping: float = 0.01  # dimensionless per-second damping
-    angular_damping: float = 0.05  # dimensionless per-second angular damping
+    angular_damping: float = 0.25  # dimensionless per-second angular damping (increased for realistic rolling decay)
 
     def initialize(self) -> List[RigidBodyState]:
         states: List[RigidBodyState] = []
