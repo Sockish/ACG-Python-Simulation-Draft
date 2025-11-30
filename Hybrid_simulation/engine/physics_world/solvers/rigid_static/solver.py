@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Tuple
 
 from ...math_utils import (
@@ -11,6 +11,7 @@ from ...math_utils import (
     quaternion_to_matrix, sub
 )
 from ...state import RigidBodyState, StaticBodyState
+from .triangle_detector import TriangleMeshCollisionDetector
 
 
 @dataclass
@@ -24,23 +25,49 @@ class ContactPoint:
 
 @dataclass
 class RigidStaticSolver:
-    restitution: float = 0.5  # Coefficient of restitution
-    friction: float = 0.3  # Coefficient of friction
+    restitution: float = 0.9  # Coefficient of restitution
+    friction: float = 1.0  # Coefficient of friction
     rolling_resistance_coefficient: float = 0.15  # Rolling resistance coefficient (increased for faster decay)
     use_broadphase: bool = True  # Use AABB broadphase culling
     max_contacts_per_pair: int = 4  # Maximum contact points to process per collision pair
     max_position_iterations: int = 10  # Maximum iterations to eliminate penetration
-    baumgarte_factor: float = 0.7  # Position correction strength (aggressive)
+    baumgarte_factor: float = 0.8  # Position correction strength (aggressive)
     penetration_tolerance: float = 0.0001  # Stop when penetration below this (0.1mm)
     velocity_threshold: float = 0.1  # Velocity below which to apply resting contact (m/s)
     max_penetration_correction: float = 0.5  # Maximum position correction per iteration (m)
-    gravity_compensation: bool = True  # Apply support force to counteract gravity
-    resting_angular_threshold: float = 0.001  # Angular velocity threshold for damping (rad/s)
+    resting_angular_threshold: float = 0.01  # Angular velocity threshold for damping (rad/s)
+    use_triangle_collision: bool = True  # Use precise triangle mesh collision (vs AABB approximation)
+    use_spatial_hash: bool = True  # Use spatial hash acceleration for triangle collision
+    spatial_hash_cell_size: float = 0.3  # Cell size for spatial hash grid (meters)
+    
+    # Internal collision detector (initialized on first use)
+    _collision_detector: TriangleMeshCollisionDetector = field(default=None, init=False, repr=False)
+    _initialized: bool = field(default=False, init=False, repr=False)
+    
+    def _ensure_initialized(self, statics: List[StaticBodyState]) -> None:
+        """Initialize collision detector and build acceleration structures."""
+        if self._initialized:
+            return
+        
+        if self.use_triangle_collision:
+            self._collision_detector = TriangleMeshCollisionDetector(
+                use_spatial_hash=self.use_spatial_hash,
+                cell_size=self.spatial_hash_cell_size
+            )
+            
+            # Build acceleration structures for all static meshes
+            for static in statics:
+                self._collision_detector.build_acceleration_structure(static)
+        
+        self._initialized = True
 
     def step(self, rigids: List[RigidBodyState], statics: List[StaticBodyState], dt: float) -> None:
         """Detect and resolve collisions between rigid and static bodies."""
         if not rigids or not statics:
             return
+        
+        # Initialize collision detector on first call
+        self._ensure_initialized(statics)
         
         for rigid in rigids:
             if rigid.mass <= 0:  # Skip static/kinematic bodies
@@ -90,7 +117,8 @@ class RigidStaticSolver:
                 
                 while max_penetration > self.penetration_tolerance and iteration < self.max_position_iterations:
                     # Resolve collisions using the detected contact points
-                    self._resolve_contacts(rigid, contacts)
+                    self._resolve_contacts(rigid, contacts, dt)
+                    print(f"  Iteration {iteration}: max penetration = {max_penetration:.6f}m")
                     
                     # Re-compute rotation matrix and world vertices after position correction
                     rotation_matrix = quaternion_to_matrix(rigid.orientation)
@@ -109,44 +137,53 @@ class RigidStaticSolver:
                 # Apply rolling resistance when in contact with ground
                 self._apply_rolling_resistance(rigid, contacts, dt)
                 print(f"Resolved collision after {iteration} iterations, remaining max penetration: {max_penetration:.6f}m")
+                # self._apply_sliding_resistance(rigid, contacts, dt) ## This term is very small!
                 
     
     def _detect_contacts(self, world_vertices: List[Vec3], local_vertices: List[Vec3],
                         rigid_position: Vec3, rotation_matrix: Tuple[Vec3, Vec3, Vec3],
                         static: StaticBodyState) -> List[ContactPoint]:
-        """Detect contact points between rigid body vertices and static AABB.
+        """Detect contact points between rigid body vertices and static mesh.
         
-        Args:
-            use_prediction: If True, detect contacts with a larger threshold to catch
-                          approaching vertices. If False, only detect actual penetrations.
+        Supports both triangle mesh collision (precise) and AABB collision (fast approximation).
         """
         contacts: List[ContactPoint] = []
         bounds_min, bounds_max = static.world_bounds
         
-        # Set threshold based on mode
-        contact_threshold = 0.0000  # Strict penetration threshold (0.0m)
+        contact_threshold = 0.0000  # Strict penetration threshold
         
         for world_vert, local_vert in zip(world_vertices, local_vertices):
-            # Check if vertex is inside or very close to static AABB
-            signed_distance = distance_to_aabb(world_vert, bounds_min, bounds_max)
+            contact_result = None
             
-            # Only process penetrating or touching vertices
-            if signed_distance < contact_threshold:
-                # Get contact point (closest point on AABB)
-                contact_pos = closest_point_on_aabb(world_vert, bounds_min, bounds_max)
+            if self.use_triangle_collision and self._collision_detector is not None:
+                # Use precise triangle mesh collision
+                contact_result = self._collision_detector.detect_vertex_contacts(
+                    world_vert, local_vert, static, contact_threshold
+                )
                 
-                # Get surface normal at contact point
-                normal = aabb_normal_at_point(contact_pos, bounds_min, bounds_max)
+                if contact_result is not None and contact_result[2] < 0.02:  # 6cm max penetration for valid contact
+                    contact_pos, normal, penetration = contact_result
+                    contacts.append(ContactPoint(
+                        position=contact_pos,
+                        normal=normal,
+                        penetration=penetration,
+                        rigid_local=local_vert
+                    ))
+            else:
+                # Fallback to AABB collision (original behavior)
+                signed_distance = distance_to_aabb(world_vert, bounds_min, bounds_max)
                 
-                # Calculate penetration depth (negative distance = penetration)
-                penetration = -signed_distance
-                
-                contacts.append(ContactPoint(
-                    position=contact_pos,
-                    normal=normal,
-                    penetration=penetration,
-                    rigid_local=local_vert
-                ))
+                if signed_distance < contact_threshold:
+                    contact_pos = closest_point_on_aabb(world_vert, bounds_min, bounds_max)
+                    normal = aabb_normal_at_point(contact_pos, bounds_min, bounds_max)
+                    penetration = -signed_distance
+                    
+                    contacts.append(ContactPoint(
+                        position=contact_pos,
+                        normal=normal,
+                        penetration=penetration,
+                        rigid_local=local_vert
+                    ))
         
         # Limit number of contacts to avoid over-processing
         if len(contacts) > self.max_contacts_per_pair:
@@ -156,7 +193,7 @@ class RigidStaticSolver:
         
         return contacts
     
-    def _resolve_contacts(self, rigid: RigidBodyState, contacts: List[ContactPoint]) -> None:
+    def _resolve_contacts(self, rigid: RigidBodyState, contacts: List[ContactPoint], dt: float) -> None:
         """Resolve collision using impulse-based method for all contact points."""
         if not contacts:
             return
@@ -237,8 +274,10 @@ class RigidStaticSolver:
                 
                 # Apply friction impulse
                 impulse_t = mul(tangent, j_t)
+                print(f"Applying friction impulse: {impulse_t}, j_t: {j_t:.6f}, old linear velocity: {rigid.linear_velocity}")
                 rigid.linear_velocity = add(rigid.linear_velocity, mul(impulse_t, inv_mass))
-                
+                print(f"Applied friction impulse: {impulse_t}, j_t: {j_t:.6f}, new linear velocity: {rigid.linear_velocity}")
+
                 # Angular impulse from friction
                 torque_t = cross(r, impulse_t)
                 angular_impulse_t = mul(torque_t, inv_I)
@@ -263,7 +302,7 @@ class RigidStaticSolver:
         
         # Normal force magnitude (approximate from gravity)
         # F_n ≈ m * g (assuming object is resting on surface)
-        normal_force = rigid.mass * 9.81  # Approximate normal force
+        normal_force = rigid.mass * 9.81 * dot(avg_normal, (0.0, 0.0, 1.0))  # Approximate normal force
         
         # Rolling resistance torque magnitude: τ_r = C_rr * F_n * r
         # where C_rr is rolling resistance coefficient, r is contact radius
@@ -276,6 +315,7 @@ class RigidStaticSolver:
         
         # Rolling resistance torque magnitude
         rolling_torque_magnitude = self.rolling_resistance_coefficient * normal_force * avg_contact_distance
+        #print(f"Rolling resistance torque magnitude: {rolling_torque_magnitude:.4f} N·m, normal force: {normal_force:.4f} N")
         
         # Direction: opposite to angular velocity
         angular_speed = length(rigid.angular_velocity)
@@ -304,3 +344,42 @@ class RigidStaticSolver:
                 new_speed_actual = length(rigid.angular_velocity)
                 reduction_percent = (angular_speed - new_speed_actual) / angular_speed * 100
                 print(f"Rolling resistance: torque_mag={rolling_torque_magnitude:.4f} N·m, speed: {angular_speed:.4f} → {new_speed_actual:.4f} rad/s ({reduction_percent:.1f}% reduction)")
+
+    def _apply_sliding_resistance(self, rigid: RigidBodyState, contacts: List[ContactPoint], dt: float) -> None:
+        """Apply sliding resistance (kinetic friction) to reduce linear velocity when in contact."""
+        if not contacts:
+            return
+        
+        # Average normal from contacts
+        avg_normal = (
+            sum(c.normal[0] for c in contacts) / len(contacts),
+            sum(c.normal[1] for c in contacts) / len(contacts),
+            sum(c.normal[2] for c in contacts) / len(contacts),
+        )
+        avg_normal = normalize(avg_normal)
+        
+        # compute the tangential friction direction according to the contact points' velocity's projection on the contact plane, v = v_linear + ω × r and then subtract normal component
+        v_contact_avg = tuple(sum(add(rigid.linear_velocity, cross(rigid.angular_velocity, sub(contact.position, rigid.position)))[i] for contact in contacts) / len(contacts) for i in range(3))
+        v_t_avg = sub(v_contact_avg, mul(avg_normal, dot(v_contact_avg, avg_normal)))
+        v_t_mag = length(v_t_avg)
+        print(f"Average tangential velocity at contacts: {v_t_avg}, magnitude: {v_t_mag:.4f} m/s")
+        if v_t_mag < 1e-6:
+            return  # No significant tangential velocity
+        tangent = mul(v_t_avg, 1.0 / v_t_mag)
+        # Friction acceleration magnitude: a_f = μ_k * g * cos(θ)
+        friction_acceleration_mag = self.friction * 9.81 * dot(avg_normal, (0.0, 0.0, 1.0))  # Approximate normal force component
+        friction_acceleration = mul(tangent, -friction_acceleration_mag)
+        # Update linear velocity: v = v + a_f * dt
+        new_linear_velocity = add(rigid.linear_velocity, mul(friction_acceleration, dt))
+        # Check if we would reverse direction (overdamping)
+        dot_product = dot(rigid.linear_velocity, new_linear_velocity)
+        if dot_product < 0:
+            # Would reverse - stop linear motion in that direction
+            rigid.linear_velocity = sub(rigid.linear_velocity, mul(tangent, dot(rigid.linear_velocity, tangent)))
+            print(f"Sliding resistance stopped linear motion along tangent: old velocity={rigid.linear_velocity} → {rigid.linear_velocity}")
+        else:
+            rigid.linear_velocity = new_linear_velocity
+            new_speed_actual = length(rigid.linear_velocity)
+            old_speed = length(add(rigid.linear_velocity, mul(friction_acceleration, -dt)))
+            reduction_percent = (old_speed - new_speed_actual) / old_speed * 100 if old_speed > 1e-6 else 0.0
+            print(f"Sliding resistance: acc_mag={friction_acceleration_mag:.4f} m/s², speed: {old_speed:.4f} → {new_speed_actual:.4f} m/s ({reduction_percent:.1f}% reduction)")

@@ -69,11 +69,23 @@ class StaticBodyState:
     orientation: Quaternion  # unit quaternion - always (0,0,0,1) for no rotation
     local_bounds_min: Vec3  # meters (m) - bounds from OBJ file
     local_bounds_max: Vec3  # meters (m) - bounds from OBJ file
+    vertices: List[Vec3]  # All vertices in world space
+    faces: List[Tuple[int, int, int]]  # Triangle indices (v0, v1, v2)
 
     @property
     def world_bounds(self) -> tuple[Vec3, Vec3]:
         # Static bodies use absolute coordinates from OBJ, no transformation needed
         return self.local_bounds_min, self.local_bounds_max
+    
+    def get_triangle(self, face_idx: int) -> Tuple[Vec3, Vec3, Vec3]:
+        """Get world-space vertices of a triangle by face index."""
+        i0, i1, i2 = self.faces[face_idx]
+        return self.vertices[i0], self.vertices[i1], self.vertices[i2]
+    
+    @property
+    def triangle_count(self) -> int:
+        """Get total number of triangles in the mesh."""
+        return len(self.faces)
 
 
 @dataclass
