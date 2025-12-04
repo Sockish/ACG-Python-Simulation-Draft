@@ -14,6 +14,7 @@ from .solvers import (
     FluidStaticSolver,
     RigidBodySolver,
     RigidStaticSolver,
+    RigidRigidSolver,
 )
 
 
@@ -22,6 +23,7 @@ class PhysicsWorld:
     config: SceneConfig
     fluid_solver: FluidSolver | None
     rigid_solver: RigidBodySolver
+    rigid_rigid_solver: RigidRigidSolver
     fluid_rigid_solver: FluidRigidCouplingSolver
     fluid_static_solver: FluidStaticSolver
     rigid_static_solver: RigidStaticSolver
@@ -44,6 +46,7 @@ class PhysicsWorld:
             fluid_state = None
         
         rigid_solver = RigidBodySolver(config.rigid_bodies, gravity)
+        rigid_rigid_solver = RigidRigidSolver()
         fluid_rigid_solver = FluidRigidCouplingSolver()
         fluid_static_solver = FluidStaticSolver()
         rigid_static_solver = RigidStaticSolver()
@@ -88,6 +91,7 @@ class PhysicsWorld:
             config=config,
             fluid_solver=fluid_solver,
             rigid_solver=rigid_solver,
+            rigid_rigid_solver=rigid_rigid_solver,
             fluid_rigid_solver=fluid_rigid_solver,
             fluid_static_solver=fluid_static_solver,
             rigid_static_solver=rigid_static_solver,
@@ -103,8 +107,14 @@ class PhysicsWorld:
             self.fluid_static_solver.step(self.fluid_state, self.static_states, dt)
             self.fluid_rigid_solver.step(self.fluid_state, self.rigid_states, dt)
         
-        # run rigid body simulation， inside will couple no rigids situations
+        # run rigid body simulation, inside will couple no rigids situations
         self.rigid_solver.step(self.rigid_states, dt)
+        
+        # Rigid-rigid collision (between multiple rigid bodies)
+        if len(self.rigid_states) > 1:
+            self.rigid_rigid_solver.step(self.rigid_states, dt)
+        
+        # Rigid-static collision
         self.rigid_static_solver.step(self.rigid_states, self.static_states, dt)
 
         self.current_time += dt
