@@ -86,6 +86,25 @@ def transform_point(point: Vec3, matrix: Tuple[Vec3, Vec3, Vec3], translation: V
     return x + translation[0], y + translation[1], z + translation[2]
 
 
+def inverse_transform_point(point: Vec3, matrix: Tuple[Vec3, Vec3, Vec3], translation: Vec3) -> Vec3:
+    """Transform a world-space point to local space.
+    
+    Inverse of transform_point: first subtract translation, then apply transpose of rotation matrix.
+    For orthonormal rotation matrices, transpose equals inverse.
+    """
+    # Subtract translation first
+    px = point[0] - translation[0]
+    py = point[1] - translation[1]
+    pz = point[2] - translation[2]
+    
+    # Apply transpose of rotation matrix (inverse for orthonormal matrices)
+    # matrix[i][j] -> matrix[j][i]
+    x = px * matrix[0][0] + py * matrix[1][0] + pz * matrix[2][0]
+    y = px * matrix[0][1] + py * matrix[1][1] + pz * matrix[2][1]
+    z = px * matrix[0][2] + py * matrix[1][2] + pz * matrix[2][2]
+    return x, y, z
+
+
 def cross(a: Vec3, b: Vec3) -> Vec3:
     """Cross product of two 3D vectors."""
     return (

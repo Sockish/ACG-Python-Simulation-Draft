@@ -9,6 +9,7 @@ from .mesh_collision import (
 )
 from .spatial_hash import SpatialHashGrid
 from .triangle_detector import TriangleMeshCollisionDetector
+from .pybullet_detector import PyBulletCollisionDetector
 
 __all__ = [
     "RigidStaticSolver",
@@ -18,4 +19,5 @@ __all__ = [
     "vertex_triangle_collision",
     "SpatialHashGrid",
     "TriangleMeshCollisionDetector",
+    "PyBulletCollisionDetector",
 ]

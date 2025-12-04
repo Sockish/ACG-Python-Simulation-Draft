@@ -8,10 +8,11 @@ from typing import List, Tuple
 from ...math_utils import (
     Vec3, add, aabb_intersects_aabb, aabb_normal_at_point, closest_point_on_aabb,
     cross, distance_to_aabb, dot, length, mul, normalize, point_in_aabb, 
-    quaternion_to_matrix, sub
+    quaternion_to_matrix, sub, inverse_transform_point
 )
 from ...state import RigidBodyState, StaticBodyState
 from .triangle_detector import TriangleMeshCollisionDetector
+from .pybullet_detector import PyBulletCollisionDetector
 
 
 @dataclass
@@ -39,17 +40,31 @@ class RigidStaticSolver:
     use_triangle_collision: bool = True  # Use precise triangle mesh collision (vs AABB approximation)
     use_spatial_hash: bool = True  # Use spatial hash acceleration for triangle collision
     spatial_hash_cell_size: float = 0.3  # Cell size for spatial hash grid (meters)
+    use_pybullet_collision: bool = True  # Use PyBullet for collision detection (most accurate)
     
     # Internal collision detector (initialized on first use)
     _collision_detector: TriangleMeshCollisionDetector = field(default=None, init=False, repr=False)
+    _pybullet_detector: PyBulletCollisionDetector = field(default=None, init=False, repr=False)
     _initialized: bool = field(default=False, init=False, repr=False)
     
-    def _ensure_initialized(self, statics: List[StaticBodyState]) -> None:
+    def _ensure_initialized(self, rigids: List[RigidBodyState], statics: List[StaticBodyState]) -> None:
         """Initialize collision detector and build acceleration structures."""
         if self._initialized:
             return
         
-        if self.use_triangle_collision:
+        if self.use_pybullet_collision:
+            # Initialize PyBullet detector
+            self._pybullet_detector = PyBulletCollisionDetector()
+            self._pybullet_detector.initialize()
+            
+            # Register all bodies
+            for rigid in rigids:
+                self._pybullet_detector.register_rigid_body(rigid)
+            for static in statics:
+                self._pybullet_detector.register_static_body(static)
+                
+            print(f"[RigidStaticSolver] Using PyBullet collision detection")
+        elif self.use_triangle_collision:
             self._collision_detector = TriangleMeshCollisionDetector(
                 use_spatial_hash=self.use_spatial_hash,
                 cell_size=self.spatial_hash_cell_size
@@ -58,6 +73,10 @@ class RigidStaticSolver:
             # Build acceleration structures for all static meshes
             for static in statics:
                 self._collision_detector.build_acceleration_structure(static)
+            
+            print(f"[RigidStaticSolver] Using triangle mesh collision detection")
+        else:
+            print(f"[RigidStaticSolver] Using AABB collision detection")
         
         self._initialized = True
 
@@ -67,7 +86,7 @@ class RigidStaticSolver:
             return
         
         # Initialize collision detector on first call
-        self._ensure_initialized(statics)
+        self._ensure_initialized(rigids, statics)
         
         for rigid in rigids:
             if rigid.mass <= 0:  # Skip static/kinematic bodies
@@ -96,15 +115,18 @@ class RigidStaticSolver:
             
             # Check collision with each static body
             for static in statics:
-                # Broadphase: AABB intersection test
-                if self.use_broadphase:
+                # Broadphase: AABB intersection test (skip for PyBullet - it does its own broadphase)
+                if self.use_broadphase and not self.use_pybullet_collision:
                     static_min, static_max = static.world_bounds
                     if not aabb_intersects_aabb(rigid_aabb_min, rigid_aabb_max, static_min, static_max):
                         continue
                 
-                # Fine-phase: Check which vertices penetrate the static AABB
-                contacts = self._detect_contacts(world_vertices, rigid.centered_vertices, 
-                                                 rigid.position, rotation_matrix, static)
+                # Fine-phase: Detect contacts using selected method
+                if self.use_pybullet_collision:
+                    contacts = self._detect_contacts_pybullet(rigid, static, rotation_matrix)
+                else:
+                    contacts = self._detect_contacts(world_vertices, rigid.centered_vertices, 
+                                                     rigid.position, rotation_matrix, static)
                 
                 if not contacts:
                     continue
@@ -123,8 +145,13 @@ class RigidStaticSolver:
                     # Re-compute rotation matrix and world vertices after position correction
                     rotation_matrix = quaternion_to_matrix(rigid.orientation)
                     world_vertices = rigid.get_world_vertices()
-                    contacts = self._detect_contacts(world_vertices, rigid.centered_vertices,
-                                                    rigid.position, rotation_matrix, static)
+                    
+                    # Re-detect contacts using the same method
+                    if self.use_pybullet_collision:
+                        contacts = self._detect_contacts_pybullet(rigid, static, rotation_matrix)
+                    else:
+                        contacts = self._detect_contacts(world_vertices, rigid.centered_vertices,
+                                                        rigid.position, rotation_matrix, static)
                     
                     if not contacts:
                         print(f"  No contacts after iteration {iteration}, breaking")
@@ -193,6 +220,44 @@ class RigidStaticSolver:
         
         return contacts
     
+    def _detect_contacts_pybullet(
+        self,
+        rigid: RigidBodyState,
+        static: StaticBodyState,
+        rotation_matrix: Tuple[Vec3, Vec3, Vec3]
+    ) -> List[ContactPoint]:
+        """Detect contact points using PyBullet collision detection.
+        
+        PyBullet provides robust, accurate collision detection for complex meshes.
+        The detected contacts are converted to our ContactPoint format for resolution.
+        """
+        if self._pybullet_detector is None:
+            return []
+        
+        # Get contacts from PyBullet
+        pybullet_contacts = self._pybullet_detector.detect_contacts(
+            rigid, static, max_contacts=self.max_contacts_per_pair
+        )
+        
+        contacts: List[ContactPoint] = []
+        
+        for pb_contact in pybullet_contacts:
+            # Convert PyBullet contact to our ContactPoint format
+            # Use position on rigid body as contact position
+            contact_pos = pb_contact.position_on_rigid
+            
+            # Compute local position by inverse transforming
+            local_pos = inverse_transform_point(contact_pos, rotation_matrix, rigid.position)
+            
+            contacts.append(ContactPoint(
+                position=contact_pos,
+                normal=pb_contact.normal,
+                penetration=pb_contact.penetration,
+                rigid_local=local_pos
+            ))
+        
+        return contacts
+
     def _resolve_contacts(self, rigid: RigidBodyState, contacts: List[ContactPoint], dt: float) -> None:
         """Resolve collision using impulse-based method for all contact points."""
         if not contacts:
