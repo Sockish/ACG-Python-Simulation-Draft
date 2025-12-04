@@ -112,7 +112,7 @@ class SphSolver:
 
     def step(self,
              fluid: FluidState,
-             solid: SolidStates,
+             #solid: SolidStates,
              
              force_damp: float,
              dt: float):

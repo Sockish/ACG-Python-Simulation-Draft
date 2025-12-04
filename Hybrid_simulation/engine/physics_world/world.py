@@ -23,8 +23,8 @@ class PhysicsWorld:
     fluid_solver: SphSolver | None
     rigid_solver: RigidBodySolver
     rigid_rigid_solver: RigidRigidSolver
-    fluid_rigid_solver: FluidRigidCouplingSolver
-    fluid_static_solver: FluidStaticSolver
+    #fluid_rigid_solver: FluidRigidCouplingSolver
+    #fluid_static_solver: FluidStaticSolver
     rigid_static_solver: RigidStaticSolver
     fluid_state: FluidState | None
     rigid_states: list[RigidBodyState]
@@ -51,8 +51,8 @@ class PhysicsWorld:
 
         rigid_solver = RigidBodySolver(config.rigid_bodies, gravity)
         rigid_rigid_solver = RigidRigidSolver()
-        fluid_rigid_solver = FluidRigidCouplingSolver()
-        fluid_static_solver = FluidStaticSolver()
+        #fluid_rigid_solver = FluidRigidCouplingSolver()
+        #fluid_static_solver = FluidStaticSolver()
         rigid_static_solver = RigidStaticSolver()
 
         rigid_states = rigid_solver.initialize()
@@ -96,8 +96,8 @@ class PhysicsWorld:
             fluid_solver=fluid_solver,
             rigid_solver=rigid_solver,
             rigid_rigid_solver=rigid_rigid_solver,
-            fluid_rigid_solver=fluid_rigid_solver,
-            fluid_static_solver=fluid_static_solver,
+           # fluid_rigid_solver=fluid_rigid_solver,
+            #fluid_static_solver=fluid_static_solver,
             rigid_static_solver=rigid_static_solver,
             fluid_state=fluid_state,
             rigid_states=rigid_states,
