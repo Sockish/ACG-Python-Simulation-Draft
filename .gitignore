@@ -1,3 +1,4 @@
 Python_simulation/output/
 *__pycache__/
 *.vscode/
+*outputs/

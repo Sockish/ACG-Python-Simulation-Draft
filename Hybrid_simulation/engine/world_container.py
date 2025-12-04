@@ -30,7 +30,11 @@ class WorldContainer:
     def step(self, dt: float | None = None, *, export: bool = True) -> None:
         """Advance the world by a single step and optionally export state."""
         dt = dt if dt is not None else self.config.simulation.time_step
-        snapshot = self.world.step(dt)
+        if self.current_step < 100:
+            liquid_force_damp = 0.1
+        else:
+            liquid_force_damp = 1.0
+        snapshot = self.world.step(liquid_force_damp, dt)
         if export:
             self.exporter.export_step(self.current_step, snapshot)
         self.current_step += 1

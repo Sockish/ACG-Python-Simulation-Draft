@@ -5,61 +5,21 @@ simulation:
   time_step: 0.01  # s
   total_steps: 200
   gravity: [0.0, 0.0, -9.81]  # m/s^2
-# liquid_box:
-#   min_corner: [-0.3, 0.05, 0.25]  # m
-#   max_corner: [0.3, 0.3, 0.45]  # m
-#   particle_spacing: 0.05  # m
-#   rest_density: 1000.0  # kg/m^3
-#   smoothing_length: 0.08  # m
-rigid_bodies:
-  - name: rigid_sphere
-    mesh_path: assets/rigid/sphere.obj
-    mass: 2.5  # kg
-    inertia: [1.0, 1.0, 1.0]  # kg·m^2
-    initial_position: [0.0, 0.0, 2.0]  # m
-    initial_orientation: [0.0, 0.0, 0.0, 1.0]
-    initial_linear_velocity: [0.0, 0.0, 0.0]  # m/s
-    initial_angular_velocity: [1.0, 0.5, 1.0]  # rad/s
-  - name: rigid_sphere_2
-    mesh_path: assets/rigid/sphere.obj
-    mass: 2.0  # kg
-    inertia: [0.8, 0.8, 0.8]  # kg·m^2
-    initial_position: [0.0, 0.0, 2.3]  # m
-    initial_orientation: [0.0, 0.0, 0.0, 1.0]
-    initial_linear_velocity: [0.0, 0.0, 0.0]  # m/s
-    initial_angular_velocity: [0.0, 0.0, 0.0]  # rad/s
-  - name: rigid_sphere_3
-    mesh_path: assets/rigid/sphere.obj
-    mass: 2.0  # kg
-    inertia: [0.8, 0.8, 0.8]  # kg·m^2
-    initial_position: [0.2, 0.3, 2.2]  # m
-    initial_orientation: [0.0, 0.0, 0.0, 1.0]
-    initial_linear_velocity: [0.0, 0.0, 0.0]  # m/s
-    initial_angular_velocity: [0.0, 0.0, 0.0]  # rad/s
-  - name: rigid_sphere_4
-    mesh_path: assets/rigid/sphere.obj
-    mass: 2.0  # kg
-    inertia: [0.8, 0.8, 0.8]  # kg·m^2
-    initial_position: [-0.2, 0.3, 2.2]  # m
-    initial_orientation: [0.0, 0.0, 0.0, 1.0]
-    initial_linear_velocity: [0.0, 0.0, 0.0]  # m/s
-    initial_angular_velocity: [0.0, 0.0, 0.0]  # rad/s
-  - name: rigid_sphere_5
-    mesh_path: assets/rigid/sphere.obj
-    mass: 2.0  # kg
-    inertia: [0.8, 0.8, 0.8]  # kg·m^2
-    initial_position: [-0.2, -0.3, 2.2]  # m
-    initial_orientation: [0.0, 0.0, 0.0, 1.0]
-    initial_linear_velocity: [0.0, 0.0, 0.0]  # m/s
-    initial_angular_velocity: [0.0, 0.0, 0.0]  # rad/s
-  - name: rigid_sphere_6
-    mesh_path: assets/rigid/1.obj
-    mass: 2.0  # kg
-    inertia: [0.8, 0.8, 0.8]  # kg·m^2
-    initial_position: [-0.2, -0.3, 3.2]  # m
-    initial_orientation: [0.0, 0.0, 0.0, 1.0]
-    initial_linear_velocity: [0.0, 0.0, 0.0]  # m/s
-    initial_angular_velocity: [0.0, 0.0, 0.0]  # rad/s
+liquid_box:
+  min_corner: [-0.3, 0.05, 0.25]  # m
+  max_corner: [0.3, 0.3, 0.45]  # m
+  particle_spacing: 0.05  # m
+  rest_density: 1000.0  # kg/m^3
+  smoothing_length: 0.08  # m
+# rigid_bodies:
+#   - name: rigid_sphere
+#     mesh_path: assets/rigid/sphere.obj
+#     mass: 2.5  # kg
+#     inertia: [1.0, 1.0, 1.0]  # kg·m^2
+#     initial_position: [0.0, 0.0, 0.0]  # m
+#     initial_orientation: [0.0, 0.0, 0.0, 1.0]
+#     initial_linear_velocity: [0.0, 0.0, 0.0]  # m/s
+#     initial_angular_velocity: [0.0, 0.0, 0.0]  # rad/s
 static_bodies:
   - name: static_sphere
     mesh_path: assets/rigid/1.obj

@@ -21,7 +21,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--splashsurf-cmd",
         type=str,
-        default="splashsurf",
+        default="pysplashsurf",
         help="Executable used to run splashsurf",
     )
     parser.add_argument(
