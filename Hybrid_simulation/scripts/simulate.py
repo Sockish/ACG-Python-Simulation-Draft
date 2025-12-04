@@ -9,6 +9,7 @@ from pathlib import Path
 # Add parent directory to path to find engine module
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from tqdm import tqdm
 from engine import WorldContainer
 
 
@@ -27,7 +28,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     container = WorldContainer.from_config_file(args.config)
-    container.run(steps=args.steps)
+    
+    steps = args.steps if args.steps is not None else container.config.simulation.total_steps
+    for _ in tqdm(range(steps), desc="Simulating"):
+        container.step()
 
 
 if __name__ == "__main__":

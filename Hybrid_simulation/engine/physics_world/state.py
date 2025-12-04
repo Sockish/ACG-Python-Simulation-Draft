@@ -70,10 +70,10 @@ class StaticBodyState:
     local_bounds_min: Vec3  # meters (m) - bounds from OBJ file
     local_bounds_max: Vec3  # meters (m) - bounds from OBJ file
 
-    @property
-    def world_bounds(self) -> tuple[Vec3, Vec3]:
-        # Static bodies use absolute coordinates from OBJ, no transformation needed
-        return self.local_bounds_min, self.local_bounds_max
+    # @property
+    # def world_bounds(self) -> tuple[Vec3, Vec3]:
+    #     # Static bodies use absolute coordinates from OBJ, no transformation needed
+    #     return self.local_bounds_min, self.local_bounds_max
 
 
 @dataclass

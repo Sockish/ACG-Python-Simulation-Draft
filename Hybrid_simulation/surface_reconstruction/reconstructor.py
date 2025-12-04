@@ -30,9 +30,9 @@ class SplashsurfReconstructor:
     cube_size_multiplier: float = 0.5
     surface_threshold: float = 0.6
     rest_density: float | None = None
-    mesh_smoothing_iters: int = 15
+    mesh_smoothing_iters: int = 10
     mesh_smoothing_weights: bool = True
-    normals: bool = True
+    normals: bool = False
     normals_smoothing_iters: int = 10
     extra_args: Sequence[str] = field(default_factory=tuple)
 
@@ -100,20 +100,6 @@ class SplashsurfReconstructor:
         command += ["--surface-threshold", f"{self.surface_threshold:.6f}"]
         command += ["--rest-density", f"{self.rest_density:.6f}"]
 
-        min_corner = self.config.liquid_box.min_corner
-        max_corner = self.config.liquid_box.max_corner
-        command += [
-            "--particle-aabb-min",
-            str(min_corner[0]),
-            str(min_corner[1]),
-            str(min_corner[2]),
-        ]
-        command += [
-            "--particle-aabb-max",
-            str(max_corner[0]),
-            str(max_corner[1]),
-            str(max_corner[2]),
-        ]
 
         if self.mesh_smoothing_iters > 0:
             command += ["--mesh-smoothing-iters", str(self.mesh_smoothing_iters)]

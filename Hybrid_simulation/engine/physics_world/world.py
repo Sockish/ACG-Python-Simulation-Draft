@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from engine.physics_world.solvers.sph.solver import SphSolver
+
 from ..configuration import SceneConfig
 from ..mesh_utils import mesh_bounds
 from .math_utils import Vec3
 from .state import FluidState, RigidBodyState, StaticBodyState, WorldSnapshot
 from .solvers import (
-    FluidRigidCouplingSolver,
-    FluidSolver,
-    FluidStaticSolver,
     RigidBodySolver,
     RigidStaticSolver,
 )
@@ -20,10 +19,10 @@ from .solvers import (
 @dataclass
 class PhysicsWorld:
     config: SceneConfig
-    fluid_solver: FluidSolver | None
+    fluid_solver: SphSolver | None
     rigid_solver: RigidBodySolver
-    fluid_rigid_solver: FluidRigidCouplingSolver
-    fluid_static_solver: FluidStaticSolver
+    # fluid_rigid_solver: FluidRigidCouplingSolver
+    # fluid_static_solver: FluidStaticSolver
     rigid_static_solver: RigidStaticSolver
     fluid_state: FluidState | None
     rigid_states: list[RigidBodyState]
@@ -37,15 +36,18 @@ class PhysicsWorld:
         
         # Initialize fluid solver only if liquid_box is defined
         if config.liquid_box:
-            fluid_solver = FluidSolver(config.liquid_box, gravity)
+            fluid_solver = SphSolver(
+                liquid_box=config.liquid_box,
+                gravity=gravity)
             fluid_state = fluid_solver.initialize()
         else:
             fluid_solver = None
             fluid_state = None
-        
+        # fluid_rigid_solver = FluidRigidCouplingSolver()
+        # fluid_static_solver = FluidStaticSolver() 
+
+
         rigid_solver = RigidBodySolver(config.rigid_bodies, gravity)
-        fluid_rigid_solver = FluidRigidCouplingSolver()
-        fluid_static_solver = FluidStaticSolver()
         rigid_static_solver = RigidStaticSolver()
 
         rigid_states = rigid_solver.initialize()
@@ -68,20 +70,20 @@ class PhysicsWorld:
             config=config,
             fluid_solver=fluid_solver,
             rigid_solver=rigid_solver,
-            fluid_rigid_solver=fluid_rigid_solver,
-            fluid_static_solver=fluid_static_solver,
+            # fluid_rigid_solver=fluid_rigid_solver,
+            # fluid_static_solver=fluid_static_solver,
             rigid_static_solver=rigid_static_solver,
             fluid_state=fluid_state,
             rigid_states=rigid_states,
             static_states=static_states,
         )
 
-    def step(self, dt: float) -> WorldSnapshot:
+    def step(self, liquid_force_damp: float, dt: float) -> WorldSnapshot:
         # Only run fluid simulation if fluid_solver exists
         if self.fluid_solver and self.fluid_state:
-            self.fluid_solver.step(self.fluid_state, dt)
-            self.fluid_static_solver.step(self.fluid_state, self.static_states, dt)
-            self.fluid_rigid_solver.step(self.fluid_state, self.rigid_states, dt)
+            self.fluid_solver.step(self.fluid_state, liquid_force_damp, dt)
+            # self.fluid_static_solver.step(self.fluid_state, self.static_states, dt)
+            # self.fluid_rigid_solver.step(self.fluid_state, self.rigid_states, dt)
         
         # run rigid body simulation， inside will couple no rigids situations
         self.rigid_solver.step(self.rigid_states, dt)

@@ -2,11 +2,11 @@
 # Units: length in meters (m), time in seconds (s), mass in kilograms (kg).
 scene_name: sample_scene
 simulation:
-  time_step: 0.005  # s
+  time_step: 0.0002  # s
   total_steps: 10
   gravity: [0.0, 0.0, -9.81]  # m/s^2
 liquid_box:
-  min_corner: [-0.3, 0.05, 0.25]  # m
+  min_corner: [-0.3, -0.3, 0.25]  # m
   max_corner: [0.3, 0.3, 0.45]  # m
   particle_spacing: 0.05  # m
   rest_density: 1000.0  # kg/m^3
