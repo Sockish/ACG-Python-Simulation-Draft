@@ -86,6 +86,25 @@ def transform_point(point: Vec3, matrix: Tuple[Vec3, Vec3, Vec3], translation: V
     return x + translation[0], y + translation[1], z + translation[2]
 
 
+def inverse_transform_point(point: Vec3, matrix: Tuple[Vec3, Vec3, Vec3], translation: Vec3) -> Vec3:
+    """Transform a world-space point to local space.
+    
+    Inverse of transform_point: first subtract translation, then apply transpose of rotation matrix.
+    For orthonormal rotation matrices, transpose equals inverse.
+    """
+    # Subtract translation first
+    px = point[0] - translation[0]
+    py = point[1] - translation[1]
+    pz = point[2] - translation[2]
+    
+    # Apply transpose of rotation matrix (inverse for orthonormal matrices)
+    # matrix[i][j] -> matrix[j][i]
+    x = px * matrix[0][0] + py * matrix[1][0] + pz * matrix[2][0]
+    y = px * matrix[0][1] + py * matrix[1][1] + pz * matrix[2][1]
+    z = px * matrix[0][2] + py * matrix[1][2] + pz * matrix[2][2]
+    return x, y, z
+
+
 def cross(a: Vec3, b: Vec3) -> Vec3:
     """Cross product of two 3D vectors."""
     return (
@@ -174,16 +193,28 @@ def point_in_aabb(point: Vec3, bounds_min: Vec3, bounds_max: Vec3) -> bool:
 def distance_to_aabb(point: Vec3, bounds_min: Vec3, bounds_max: Vec3) -> float:
     """Calculate signed distance from point to AABB surface.
     
-    Negative if inside, positive if outside.
-    """
-    # Compute closest point on AABB
-    closest = closest_point_on_aabb(point, bounds_min, bounds_max)
-    dist = length(sub(point, closest))
+    Negative if inside (penetration depth), positive if outside.
     
+    For points inside AABB, returns the negative distance to the closest face
+    (the minimum penetration depth needed to exit).
+    """
     # Check if inside
     if point_in_aabb(point, bounds_min, bounds_max):
-        return -dist
-    return dist
+        # Calculate distance to each face
+        distances = [
+            point[0] - bounds_min[0],  # Distance to -X face
+            bounds_max[0] - point[0],  # Distance to +X face
+            point[1] - bounds_min[1],  # Distance to -Y face
+            bounds_max[1] - point[1],  # Distance to +Y face
+            point[2] - bounds_min[2],  # Distance to -Z face
+            bounds_max[2] - point[2],  # Distance to +Z face
+        ]
+        # Return negative of the minimum distance (penetration depth)
+        return -min(distances)
+    
+    # Point is outside: compute closest point on AABB
+    closest = closest_point_on_aabb(point, bounds_min, bounds_max)
+    return length(sub(point, closest))
 
 
 def aabb_normal_at_point(point: Vec3, bounds_min: Vec3, bounds_max: Vec3, epsilon: float = 1e-4) -> Vec3:

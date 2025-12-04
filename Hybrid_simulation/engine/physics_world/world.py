@@ -53,8 +53,26 @@ class PhysicsWorld:
         rigid_states = rigid_solver.initialize()
         static_states = []
         for body in config.static_bodies:
-            # Static bodies use absolute coordinates from OBJ file
-            local_min, local_max = mesh_bounds(body.mesh_path)
+            # Load mesh to get vertices and faces
+            from ..mesh_utils import load_obj_mesh
+            mesh = load_obj_mesh(body.mesh_path)
+            local_min, local_max = mesh.bounds()
+            
+            # Convert faces to triangles (handle quads and n-gons)
+            triangles = []
+            for face in mesh.faces:
+                if len(face) == 3:
+                    # Already a triangle
+                    triangles.append(face)
+                elif len(face) == 4:
+                    # Quad: split into two triangles
+                    triangles.append((face[0], face[1], face[2]))
+                    triangles.append((face[0], face[2], face[3]))
+                elif len(face) > 4:
+                    # N-gon: fan triangulation from first vertex
+                    for i in range(1, len(face) - 1):
+                        triangles.append((face[0], face[i], face[i + 1]))
+            
             static_states.append(
                 StaticBodyState(
                     name=body.name,
@@ -63,6 +81,8 @@ class PhysicsWorld:
                     orientation=tuple(body.initial_orientation),  # Should be (0,0,0,1)
                     local_bounds_min=local_min,
                     local_bounds_max=local_max,
+                    vertices=mesh.vertices,
+                    faces=triangles,
                 )
             )
 

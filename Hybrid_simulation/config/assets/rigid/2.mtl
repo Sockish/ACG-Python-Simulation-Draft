@@ -1,0 +1,13 @@
+# Blender 4.5.1 LTS MTL File: 'None'
+# www.blender.org
+
+newmtl Material.002
+Ka 1.000000 1.000000 1.000000
+Ks 1.000000 1.000000 1.000000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd C:/Users/Furina/Downloads/奶龙_爱给网_aigei_com/fcdb16e50cbbf384c1aaebcbb06a31bb/texture_pbr_v130.png
+map_Ns C:/Users/Furina/Downloads/奶龙_爱给网_aigei_com/fcdb16e50cbbf384c1aaebcbb06a31bb/texture_pbr_v130_roughness.png
+map_refl C:/Users/Furina/Downloads/奶龙_爱给网_aigei_com/fcdb16e50cbbf384c1aaebcbb06a31bb/texture_pbr_v130_metallic.png

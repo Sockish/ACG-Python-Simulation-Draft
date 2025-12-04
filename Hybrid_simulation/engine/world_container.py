@@ -43,4 +43,5 @@ class WorldContainer:
         """Execute multiple simulation steps."""
         total_steps = steps if steps is not None else self.config.simulation.total_steps
         for _ in range(total_steps):
+            print(f"Simulating step {self.current_step + 1}")
             self.step()
