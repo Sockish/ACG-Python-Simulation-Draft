@@ -1,6 +1,9 @@
 """SPH density computation."""
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, TYPE_CHECKING
 from .kernels import poly6
+
+if TYPE_CHECKING:
+    from .neighborhood import BoundarySample
 
 Vec3 = Tuple[float, float, float]
 
@@ -14,7 +17,8 @@ def compute_density(
     positions: List[Vec3],
     mass: float,
     h: float,
-    neighbors: List[List[int]]
+    neighbors: List[List[int]],
+    boundary_neighbors: Optional[List[List["BoundarySample"]]] = None,
 ) -> List[float]:
     """Compute density rho_i = sum_j m_j W_ij."""
     n = len(positions)
@@ -41,6 +45,12 @@ def compute_density(
             r_vec = sub(p_i, positions[j])
             r = (length_sq(r_vec)) ** 0.5
             rho += mass * poly6(r, h)
+
+        if boundary_neighbors:
+            for sample in boundary_neighbors[i]:
+                r_vec = sub(p_i, sample.position)
+                r = (length_sq(r_vec)) ** 0.5
+                rho += sample.pseudo_mass * poly6(r, h)
 
 
         # Add self contribution

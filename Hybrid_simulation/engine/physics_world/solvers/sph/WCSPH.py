@@ -18,8 +18,14 @@ from random import Random
 from typing import List, Optional, Tuple
 
 from ....configuration import LiquidBoxConfig
-from ...state import FluidState
-from .utils.neighborhood import build_hash, neighborhood_indices
+from ...state import FluidState, RigidBodyState, StaticBodyState
+from .utils.neighborhood import (
+    BoundarySample,
+    build_boundary_grids,
+    build_hash,
+    boundary_neighbors,
+    neighborhood_indices,
+)
 from .utils.density import compute_density
 from .utils.eos import compute_pressure
 from .utils.forces import compute_pressure_forces
@@ -34,17 +40,17 @@ def _seq_to_vec3(values) -> Vec3:
     return float(values[0]), float(values[1]), float(values[2])
 
 
-class SphSolver:
+class WCSphSolver:
     def __init__(
         self,
         liquid_box: LiquidBoxConfig,
         gravity: Vec3,
-        kappa: float = 6000.0,
+        kappa: float = 600.0,
         gamma: float = 7.0,
         viscosity_alpha: float = 0.05,
-        surface_tension_kappa: float = 0.073,
+        surface_tension_kappa: float = 0.00073,
         eps: float = 1e-6,
-        noise_amplitude: float = 0.0,
+        noise_amplitude: float = 0.0003,
         noise_seed: Optional[int] = None,
     ):
         self.liquid_box = liquid_box
@@ -63,6 +69,7 @@ class SphSolver:
         self.smoothing_length = float(self.liquid_box.smoothing_length)
         spacing = float(self.liquid_box.particle_spacing)
         self.particle_mass = self.liquid_box.rest_density * spacing ** 3
+        self._last_boundary_neighbors: dict[str, List[List[BoundarySample]]] | None = None
 
     def initialize(self) -> FluidState:
         """Initialize the fluid state with particles in a grid."""
@@ -110,12 +117,14 @@ class SphSolver:
             bounds_max=self.bounds_max,
         )
 
-    def step(self,
-             fluid: FluidState,
-             solid: SolidStates,
-             
-             force_damp: float,
-             dt: float):
+    def step(
+        self,
+        fluid: FluidState,
+        force_damp: float,
+        dt: float,
+        rigids: Optional[List[RigidBodyState]] = None,
+        statics: Optional[List[StaticBodyState]] = None,
+    ):
         """Advance the fluid state by one timestep dt."""
         n = len(fluid.positions)
         if n == 0:
@@ -124,18 +133,47 @@ class SphSolver:
         h = fluid.smoothing_length
         cell_size = h
 
-        # Build spatial hash
-        grid = build_hash(fluid.positions, cell_size)
+        # Build spatial hashes for fluid particles and boundary geometry
+        fluid_grid = build_hash(fluid.positions, cell_size)
+        rigid_grid, static_grid = build_boundary_grids(
+            rigids,
+            statics,
+            cell_size,
+            rest_density=fluid.rest_density,
+        )
 
-        # 1) Neighborhood lists
-        neighbors = [neighborhood_indices(i, fluid.positions, grid, cell_size) for i in range(n)]
+        print(
+            f"[BoundaryGrid] h={cell_size:.4f}, rigids={len(rigid_grid)} cells, statics={len(static_grid)} cells"
+        )
+
+        # 1) Neighborhood lists (fluid-fluid and fluid-boundary)
+        neighbors = [neighborhood_indices(i, fluid.positions, fluid_grid, cell_size) for i in range(n)]
+        rigid_neighbors = [
+            boundary_neighbors(fluid.positions[i], rigid_grid, cell_size)
+            for i in range(n)
+        ]
+        static_neighbors = [
+            boundary_neighbors(fluid.positions[i], static_grid, cell_size)
+            for i in range(n)
+        ]
+        boundary_neighbor_lists = [
+            rigid_neighbors[i] + static_neighbors[i]
+            for i in range(n)
+        ]
+
+        avg_rigid = sum(len(lst) for lst in rigid_neighbors) / max(1, n)
+        avg_static = sum(len(lst) for lst in static_neighbors) / max(1, n)
+        print(
+            f"[BoundaryNeighbors] avg_rigid={avg_rigid:.2f}, avg_static={avg_static:.2f}"
+        )
 
         # 2) Compute densities
         rho = compute_density(
             fluid.positions,
             fluid.particle_mass,
             h,
-            neighbors
+            neighbors,
+            boundary_neighbor_lists,
         )
         rho = [max(r, self.eps) for r in rho]
         fluid.densities[:] = rho
@@ -196,8 +234,37 @@ class SphSolver:
             extra_forces=surface_forces,
         )
 
+        # Hook for fluid-solid interaction forces (user-implemented)
+        self._apply_boundary_interactions(
+            fluid,
+            rho,
+            rigid_neighbors,
+            static_neighbors,
+            dt,
+        )
+
         # Write back to fluid state
         for i in range(n):
             fluid.velocities[i] = new_vel[i]
             fluid.positions[i] = new_pos[i]
+
+    def _apply_boundary_interactions(
+        self,
+        fluid: FluidState,
+        densities: List[float],
+        rigid_neighbors: List[List[BoundarySample]],
+        static_neighbors: List[List[BoundarySample]],
+        dt: float,
+    ) -> None:
+        """Placeholder hook for fluid-solid coupling.
+
+        Store neighbor information for future use so that user-defined coupling
+        forces can be implemented without touching the core integration loop.
+        """
+
+        _ = (fluid, densities, dt)
+        self._last_boundary_neighbors = {
+            "rigid": rigid_neighbors,
+            "static": static_neighbors,
+        }
 

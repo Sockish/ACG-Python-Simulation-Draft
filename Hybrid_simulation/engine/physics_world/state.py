@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Tuple
 
@@ -43,6 +43,10 @@ class RigidBodyState:
     local_bounds_max: Vec3  # meters (m)
     center_of_mass: Vec3  # local-space center of mass offset (m) - usually (0,0,0) after centering
     centered_vertices: List[Vec3]  # vertices relative to center of mass (local space)
+    triangles: List[Tuple[int, int, int]]
+    ghost_local_positions: List[Vec3] = field(default_factory=list)
+    ghost_local_normals: List[Vec3] = field(default_factory=list)
+    ghost_pseudo_masses: List[float] = field(default_factory=list)
 
     @property
     def inverse_mass(self) -> float:
@@ -60,6 +64,19 @@ class RigidBodyState:
             for v in self.centered_vertices
         ]
 
+    def get_world_ghost_particles(self) -> List[Tuple[Vec3, Vec3]]:
+        """Transform stored ghost particles (position + normal) to world space."""
+
+        if not self.ghost_local_positions:
+            return []
+        rotation_matrix = quaternion_to_matrix(self.orientation)
+        ghosts: List[Tuple[Vec3, Vec3]] = []
+        for pos, normal in zip(self.ghost_local_positions, self.ghost_local_normals):
+            world_pos = transform_point(pos, rotation_matrix, self.position)
+            world_normal = transform_point(normal, rotation_matrix, (0.0, 0.0, 0.0))
+            ghosts.append((world_pos, world_normal))
+        return ghosts
+
 
 @dataclass
 class StaticBodyState:
@@ -71,6 +88,9 @@ class StaticBodyState:
     local_bounds_max: Vec3  # meters (m) - bounds from OBJ file
     vertices: List[Vec3]  # All vertices in world space
     faces: List[Tuple[int, int, int]]  # Triangle indices (v0, v1, v2)
+    ghost_positions: List[Vec3] = field(default_factory=list)
+    ghost_normals: List[Vec3] = field(default_factory=list)
+    ghost_pseudo_masses: List[float] = field(default_factory=list)
 
     @property
     def world_bounds(self) -> tuple[Vec3, Vec3]:
@@ -86,6 +106,11 @@ class StaticBodyState:
     def triangle_count(self) -> int:
         """Get total number of triangles in the mesh."""
         return len(self.faces)
+
+    def get_world_ghost_particles(self) -> List[Tuple[Vec3, Vec3]]:
+        """Return pre-sampled ghost particles with normals."""
+
+        return list(zip(self.ghost_positions, self.ghost_normals))
 
 
 @dataclass

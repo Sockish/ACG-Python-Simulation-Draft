@@ -104,3 +104,19 @@ def center_mesh_vertices(vertices: List[Vec3], center: Vec3) -> List[Vec3]:
         for v in vertices
     ]
 
+
+def triangulate_faces(faces: List[Tuple[int, ...]]) -> List[Tuple[int, int, int]]:
+    """Convert polygon faces into triangle indices using fan triangulation."""
+
+    triangles: List[Tuple[int, int, int]] = []
+    for face in faces:
+        if len(face) == 3:
+            triangles.append((face[0], face[1], face[2]))
+        elif len(face) == 4:
+            triangles.append((face[0], face[1], face[2]))
+            triangles.append((face[0], face[2], face[3]))
+        elif len(face) > 4:
+            for i in range(1, len(face) - 1):
+                triangles.append((face[0], face[i], face[i + 1]))
+    return triangles
+

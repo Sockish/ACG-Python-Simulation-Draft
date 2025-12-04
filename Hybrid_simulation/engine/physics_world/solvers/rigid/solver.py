@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import List
 
 from ....configuration import RigidBodyConfig
-from ....mesh_utils import mesh_bounds, load_obj_mesh, compute_center_of_mass, center_mesh_vertices
+from ....mesh_utils import mesh_bounds, load_obj_mesh, compute_center_of_mass, center_mesh_vertices, triangulate_faces
 from ...math_utils import Vec3, add, mul, integrate_quaternion
 from ...state import RigidBodyState
 
@@ -35,6 +35,7 @@ class RigidBodySolver:
             # Compute bounds in centered coordinates
             centered_mesh = type(mesh)(vertices=centered_verts, faces=mesh.faces)
             local_min, local_max = centered_mesh.bounds()
+            triangles = triangulate_faces(mesh.faces)
             
             print(f"Initialized rigid body '{cfg.name}'")
             print(f"  Local center of mass: ({center[0]:.3f}, {center[1]:.3f}, {center[2]:.3f})")
@@ -55,6 +56,7 @@ class RigidBodySolver:
                     local_bounds_max=local_max,
                     center_of_mass=center,
                     centered_vertices=centered_verts,
+                    triangles=triangles,
                 )
             )
         return states

@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from engine.physics_world.solvers.sph.solver import SphSolver
+try:  # tqdm is optional but useful for long sampling runs
+    from tqdm import tqdm
+except ImportError:  # pragma: no cover - fallback when tqdm is missing
+    tqdm = None
+
+from .solvers.sph.WCSPH import WCSphSolver
+from .solvers.sph.utils.ghost_particles import sample_mesh_surface, compute_local_pseudo_masses
 
 from ..configuration import SceneConfig
-from ..mesh_utils import mesh_bounds
+from ..mesh_utils import load_obj_mesh, triangulate_faces
 from .math_utils import Vec3
 from .state import FluidState, RigidBodyState, StaticBodyState, WorldSnapshot
 from .solvers import (
@@ -19,7 +25,7 @@ from .solvers import (
 @dataclass
 class PhysicsWorld:
     config: SceneConfig
-    fluid_solver: SphSolver | None
+    fluid_solver: WCSphSolver | None
     rigid_solver: RigidBodySolver
     # fluid_rigid_solver: FluidRigidCouplingSolver
     # fluid_static_solver: FluidStaticSolver
@@ -36,7 +42,7 @@ class PhysicsWorld:
         
         # Initialize fluid solver only if liquid_box is defined
         if config.liquid_box:
-            fluid_solver = SphSolver(
+            fluid_solver = WCSphSolver(
                 liquid_box=config.liquid_box,
                 gravity=gravity)
             fluid_state = fluid_solver.initialize()
@@ -53,25 +59,9 @@ class PhysicsWorld:
         rigid_states = rigid_solver.initialize()
         static_states = []
         for body in config.static_bodies:
-            # Load mesh to get vertices and faces
-            from ..mesh_utils import load_obj_mesh
             mesh = load_obj_mesh(body.mesh_path)
             local_min, local_max = mesh.bounds()
-            
-            # Convert faces to triangles (handle quads and n-gons)
-            triangles = []
-            for face in mesh.faces:
-                if len(face) == 3:
-                    # Already a triangle
-                    triangles.append(face)
-                elif len(face) == 4:
-                    # Quad: split into two triangles
-                    triangles.append((face[0], face[1], face[2]))
-                    triangles.append((face[0], face[2], face[3]))
-                elif len(face) > 4:
-                    # N-gon: fan triangulation from first vertex
-                    for i in range(1, len(face) - 1):
-                        triangles.append((face[0], face[i], face[i + 1]))
+            triangles = triangulate_faces(mesh.faces)
             
             static_states.append(
                 StaticBodyState(
@@ -85,6 +75,42 @@ class PhysicsWorld:
                     faces=triangles,
                 )
             )
+
+        smoothing_length = fluid_solver.smoothing_length if fluid_solver else None
+        rest_density = fluid_solver.liquid_box.rest_density if fluid_solver else None
+        if smoothing_length and rest_density:
+            print(
+                f"[GhostInit] h={smoothing_length:.4f}, rho0={rest_density:.2f}"
+            )
+            for rigid in rigid_states:
+                samples = sample_mesh_surface(rigid.centered_vertices, rigid.triangles, smoothing_length)
+                rigid.ghost_local_positions = [pos for pos, _ in samples]
+                rigid.ghost_local_normals = [normal for _, normal in samples]
+                rigid.ghost_pseudo_masses = compute_local_pseudo_masses(
+                    rigid.ghost_local_positions,
+                    smoothing_length,
+                    rest_density,
+                )
+                print(
+                    f"  [GhostInit][Rigid:{rigid.name}] samples={len(rigid.ghost_local_positions)}"
+                )
+            static_iterator = (
+                tqdm(static_states, desc="[GhostInit][Static] Sampling", unit="mesh")
+                if tqdm
+                else static_states
+            )
+            for static in static_iterator:
+                samples = sample_mesh_surface(static.vertices, static.faces, smoothing_length)
+                static.ghost_positions = [pos for pos, _ in samples]
+                static.ghost_normals = [normal for _, normal in samples]
+                static.ghost_pseudo_masses = compute_local_pseudo_masses(
+                    static.ghost_positions,
+                    smoothing_length,
+                    rest_density,
+                )
+                print(
+                    f"  [GhostInit][Static:{static.name}] samples={len(static.ghost_positions)}"
+                )
 
         return cls(
             config=config,
@@ -101,7 +127,13 @@ class PhysicsWorld:
     def step(self, liquid_force_damp: float, dt: float) -> WorldSnapshot:
         # Only run fluid simulation if fluid_solver exists
         if self.fluid_solver and self.fluid_state:
-            self.fluid_solver.step(self.fluid_state, liquid_force_damp, dt)
+            self.fluid_solver.step(
+                self.fluid_state,
+                liquid_force_damp,
+                dt,
+                self.rigid_states,
+                self.static_states,
+            )
             # self.fluid_static_solver.step(self.fluid_state, self.static_states, dt)
             # self.fluid_rigid_solver.step(self.fluid_state, self.rigid_states, dt)
         

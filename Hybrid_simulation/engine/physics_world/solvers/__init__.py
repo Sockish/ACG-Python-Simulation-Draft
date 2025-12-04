@@ -2,7 +2,7 @@
 
 
 from .rigid.solver import RigidBodySolver
-from .sph.solver import SphSolver
+from .sph.WCSPH import WCSphSolver
 from .rigid_static.solver import RigidStaticSolver
 
 __all__ = [
