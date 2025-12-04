@@ -21,6 +21,10 @@ rigid_bodies:
     initial_linear_velocity: [0.0, 0.0, 0.0]  # m/s
     initial_angular_velocity: [1.0, 1.0, 1.0]  # rad/s
 static_bodies:
+  - name: static_sphere
+    mesh_path: assets/rigid/1.obj
+    initial_position: [0.0, 0.0, 0.0]  # m
+    initial_orientation: [0.0, 0.0, 0.0, 1.0]
   - name: container
     mesh_path: assets/static/container.obj
     initial_position: [0.0, 0.0, 0.0]  # m
