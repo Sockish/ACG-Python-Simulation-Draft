@@ -1,4 +1,19 @@
-"""Exporter that writes fluid particles (PLY) and meshes (OBJ) each timestep."""
+"""Exporter that writes fluid particles (PLY) and meshes (OBJ) each timestep.
+
+Output structure for rendering compatibility:
+  outputs/
+  ├── frames/           # Per-frame folders for Blender rendering
+  │   ├── 00000/
+  │   │   ├── rigid_sphere.obj
+  │   │   ├── container.obj
+  │   │   └── (liquid_surface.obj added by reconstructor)
+  │   ├── 00001/
+  │   ...
+  └── fluid/            # Raw particle data for surface reconstruction
+      ├── fluid_00000.ply
+      ├── fluid_00001.ply
+      ...
+"""
 
 from __future__ import annotations
 
@@ -16,8 +31,7 @@ from .physics_world.state import RigidBodyState, StaticBodyState, WorldSnapshot
 class SimulationExporter:
     output_root: Path
     fluid_dirname: str = "fluid"
-    rigid_dirname: str = "rigid"
-    static_dirname: str = "static"
+    frames_dirname: str = "frames"  # Per-frame folders for rendering
     _mesh_cache: Dict[Path, OBJMesh] = field(default_factory=dict, init=False, repr=False)
 
     @classmethod
@@ -25,19 +39,13 @@ class SimulationExporter:
         if config is None:
             output_root = Path("outputs")
             fluid_dirname = "fluid"
-            rigid_dirname = "rigid"
-            static_dirname = "static"
         else:
             output_root = config.output_root
             fluid_dirname = config.fluid_subdir
-            rigid_dirname = config.rigid_subdir
-            static_dirname = config.static_subdir
 
         exporter = cls(
             output_root=output_root,
             fluid_dirname=fluid_dirname,
-            rigid_dirname=rigid_dirname,
-            static_dirname=static_dirname,
         )
         exporter._ensure_directories()
         return exporter
@@ -45,20 +53,31 @@ class SimulationExporter:
     def _ensure_directories(self) -> None:
         self.output_root.mkdir(parents=True, exist_ok=True)
         (self.output_root / self.fluid_dirname).mkdir(parents=True, exist_ok=True)
-        (self.output_root / self.rigid_dirname).mkdir(parents=True, exist_ok=True)
-        (self.output_root / self.static_dirname).mkdir(parents=True, exist_ok=True)
+        (self.output_root / self.frames_dirname).mkdir(parents=True, exist_ok=True)
+
+    def _get_frame_dir(self, step_index: int) -> Path:
+        """Get or create the per-frame directory for rendering output."""
+        frame_dir = self.output_root / self.frames_dirname / f"{step_index:05d}"
+        frame_dir.mkdir(parents=True, exist_ok=True)
+        return frame_dir
 
     def export_step(self, step_index: int, snapshot: WorldSnapshot) -> None:
-        rigid_path = self.output_root / self.rigid_dirname / f"rigid_{step_index:05d}.obj"
-        static_path = self.output_root / self.static_dirname / f"static_{step_index:05d}.obj"
+        frame_dir = self._get_frame_dir(step_index)
 
-        # Only export fluid if it exists
+        # Only export fluid particles if fluid exists (for later surface reconstruction)
         if snapshot.fluids is not None:
             fluid_path = self.output_root / self.fluid_dirname / f"fluid_{step_index:05d}.ply"
             self._write_fluid_ply(fluid_path, snapshot)
-        
-        self._write_obj(rigid_path, snapshot.rigids)
-        self._write_obj(static_path, snapshot.statics)
+
+        # Export each rigid body as a separate .obj file (named by body name)
+        for body in snapshot.rigids:
+            obj_path = frame_dir / f"{body.name}.obj"
+            self._write_single_body_obj(obj_path, body)
+
+        # Export each static body as a separate .obj file (named by body name)
+        for body in snapshot.statics:
+            obj_path = frame_dir / f"{body.name}.obj"
+            self._write_single_body_obj(obj_path, body)
 
     def _write_fluid_ply(self, path: Path, snapshot: WorldSnapshot) -> None:
         fluid = snapshot.fluids
@@ -79,33 +98,32 @@ class SimulationExporter:
                     f"{vel[0]:.6f} {vel[1]:.6f} {vel[2]:.6f} {density:.6f}\n"
                 )
 
-    def _write_obj(self, path: Path, bodies: Sequence[RigidBodyState | StaticBodyState]) -> None:
+    def _write_single_body_obj(self, path: Path, body: RigidBodyState | StaticBodyState) -> None:
+        """Write a single body to an OBJ file with proper naming for Blender material transfer."""
+        mesh = self._get_mesh(body.mesh_path)
+        rotation = quaternion_to_matrix(body.orientation)
+
+        # RigidBody: use centered_vertices; StaticBody: use original vertices
+        if hasattr(body, 'centered_vertices'):
+            # Rigid body - transform centered vertices
+            transformed = [transform_point(v, rotation, body.position) for v in body.centered_vertices]
+        else:
+            # Static body - use absolute coordinates from OBJ
+            transformed = mesh.vertices
+
         with path.open("w", encoding="utf-8") as handle:
-            handle.write("# Exported by SimulationExporter\n")
-            vertex_offset = 0
-            for body in bodies:
-                mesh = self._get_mesh(body.mesh_path)
-                rotation = quaternion_to_matrix(body.orientation)
-                
-                # RigidBody: use centered_vertices; StaticBody: use original vertices
-                if hasattr(body, 'centered_vertices'):
-                    # Rigid body - transform centered vertices
-                    transformed = [transform_point(v, rotation, body.position) for v in body.centered_vertices]
-                else:
-                    # Static body - use absolute coordinates from OBJ
-                    transformed = mesh.vertices
-                
-                handle.write(f"o {body.name}\n")
-                for vx, vy, vz in transformed:
-                    handle.write(f"v {vx:.6f} {vy:.6f} {vz:.6f}\n")
-                
-                for face in mesh.faces:
-                    if len(face) < 3:
-                        continue
-                    for tri in self._triangulate(face):
-                        indices = [str(idx + 1 + vertex_offset) for idx in tri]
-                        handle.write(f"f {' '.join(indices)}\n")
-                vertex_offset += len(transformed)
+            handle.write(f"# Exported by SimulationExporter\n")
+            handle.write(f"o {body.name}\n")
+            for vx, vy, vz in transformed:
+                handle.write(f"v {vx:.6f} {vy:.6f} {vz:.6f}\n")
+
+            for face in mesh.faces:
+                if len(face) < 3:
+                    continue
+                for tri in self._triangulate(face):
+                    # Face indices are 1-based in OBJ format
+                    indices = [str(idx + 1) for idx in tri]
+                    handle.write(f"f {' '.join(indices)}\n")
 
     def _triangulate(self, face: Sequence[int]) -> Iterable[Sequence[int]]:
         if len(face) == 3:

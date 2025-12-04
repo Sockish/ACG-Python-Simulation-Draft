@@ -19,6 +19,7 @@ from surface_reconstruction import SplashsurfReconstructor
 ##   --config config/scene_config.yaml \
 ##   --splashsurf-cmd pysplashsurf \
 ##   --target-fps 60
+### python scripts/reconstruct.py --config config/scene_config.yaml --target-fps 60
 
 
 def _parse_args() -> argparse.Namespace:
@@ -39,7 +40,13 @@ def _parse_args() -> argparse.Namespace:
         "--output-dir",
         type=Path,
         default=None,
-        help="Directory for reconstructed meshes (defaults to outputs/surface)",
+        help="Directory for reconstructed meshes (defaults to frames/<step>/ for Blender compatibility)",
+    )
+    parser.add_argument(
+        "--surface-name",
+        type=str,
+        default="liquid_surface",
+        help="Name for the output surface mesh (used for Blender material matching)",
     )
     parser.add_argument(
         "--format",
@@ -145,6 +152,7 @@ def main() -> None:
         splashsurf_cmd=args.splashsurf_cmd,
         output_dir=args.output_dir,
         output_format=args.format,
+        surface_mesh_name=args.surface_name,
         particle_radius=args.particle_radius,
         smoothing_length_multiplier=args.smoothing_multiplier,
         cube_size_multiplier=args.cube_size,
