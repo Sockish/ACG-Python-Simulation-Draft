@@ -33,7 +33,7 @@ def load_obj(path: Path) -> Tuple[List[Tuple[float, float, float]], List[Tuple[i
 
 def build_mesh_sequence(mesh_dir: Path) -> list[bpy.types.Mesh]:
     meshes: list[bpy.types.Mesh] = []
-    for obj_path in sorted(mesh_dir.glob("rigid_*.obj")):
+    for obj_path in sorted(mesh_dir.glob("*.obj")):
         verts, faces = load_obj(obj_path)
         mesh = bpy.data.meshes.new(obj_path.stem)
         mesh.from_pydata(verts, [], faces)

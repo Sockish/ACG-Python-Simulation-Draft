@@ -6,8 +6,18 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Sequence
+import sys
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from engine.configuration import SceneConfig
+from tqdm import tqdm
+
+## example: .venv/Scripts/python.exe ./scripts/reconstruct.py --config config/scene_config.yaml --target-fps 60
+## .venv/Scripts/python.exe ./scripts/reconstruct.py \
+##   --config config/scene_config.yaml \
+##   --splashsurf-cmd pysplashsurf \
+##   --target-fps 60
 
 
 @dataclass
@@ -72,14 +82,36 @@ class SplashsurfReconstructor:
             steps.append(step)
         return steps
 
-    def reconstruct(self, steps: Sequence[int] | None = None) -> List[ReconstructionJob]:
+    def reconstruct(
+        self,
+        steps: Sequence[int] | None = None,
+        *,
+        frame_stride: int | None = None,
+        target_fps: float | None = None,
+    ) -> List[ReconstructionJob]:
+        """Run Splashsurf for selected steps, optionally downsampling by stride or FPS."""
+
         indices = list(steps) if steps else self.available_steps()
         if not indices:
             raise FileNotFoundError(
                 "No fluid particle dumps were found. Export particles before running reconstruction."
             )
+        if target_fps is not None:
+            if target_fps <= 0:
+                raise ValueError("target_fps must be positive if provided.")
+            sim_dt = float(self.config.simulation.time_step)
+            if sim_dt <= 0:
+                raise ValueError("Scene configuration uses a non-positive time_step, cannot derive FPS.")
+            sim_fps = 1.0 / sim_dt
+            stride_from_fps = max(1, round(sim_fps / target_fps))
+            frame_stride = max(frame_stride or 1, stride_from_fps)
+        if frame_stride is not None:
+            if frame_stride <= 0:
+                raise ValueError("frame_stride must be positive if provided.")
+            indices = indices[::frame_stride]
+
         jobs = [self._build_job(step) for step in indices]
-        for job in jobs:
+        for job in tqdm(jobs, desc="Reconstructing surfaces"):
             self._run_splashsurf(job)
         return jobs
 

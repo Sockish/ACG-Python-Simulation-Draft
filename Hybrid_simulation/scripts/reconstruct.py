@@ -3,11 +3,22 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import List
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from engine.configuration import load_scene_config
 from surface_reconstruction import SplashsurfReconstructor
+
+## .venv/Scripts/python.exe ./scripts/reconstruct.py \
+##   --config config/scene_config.yaml \
+##   --splashsurf-cmd pysplashsurf \
+##   --target-fps 60
 
 
 def _parse_args() -> argparse.Namespace:
@@ -97,6 +108,18 @@ def _parse_args() -> argparse.Namespace:
         help="Number of smoothing iterations for normals",
     )
     parser.add_argument(
+        "--frame-stride",
+        type=int,
+        default=None,
+        help="Use every Nth particle dump (e.g. 25 for ~100fps if sim is 2500fps)",
+    )
+    parser.add_argument(
+        "--target-fps",
+        type=float,
+        default=None,
+        help="Downsample to the closest stride that approximates this playback FPS",
+    )
+    parser.add_argument(
         "--step",
         type=int,
         action="append",
@@ -134,7 +157,11 @@ def main() -> None:
         extra_args=args.extra_args or [],
     )
     steps: List[int] | None = args.steps
-    jobs = reconstructor.reconstruct(steps)
+    jobs = reconstructor.reconstruct(
+        steps,
+        frame_stride=args.frame_stride,
+        target_fps=args.target_fps,
+    )
     for job in jobs:
         print(f"Reconstructed step {job.step_index} -> {job.surface_file}")
 

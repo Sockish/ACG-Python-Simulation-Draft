@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from typing import Iterable, List, Sequence, Tuple, Dict
+from tqdm import tqdm
 
 from ....math_utils import Vec3, add, cross, length, mul, normalize, sub
 from .kernels import poly6
@@ -118,7 +119,7 @@ def compute_local_pseudo_masses(
         grid.setdefault(_cell_index(pos), []).append(idx)
 
     masses: List[float] = [0.0] * count
-    for i, pos_i in enumerate(positions):
+    for i, pos_i in tqdm(enumerate(positions), total=len(positions), desc="Computing masses"):
         ci, cj, ck = _cell_index(pos_i)
         total_w = 0.0
         for di in (-1, 0, 1):
@@ -131,6 +132,6 @@ def compute_local_pseudo_masses(
                         pos_j = positions[neighbor_idx]
                         r = length(sub(pos_i, pos_j))
                         total_w += poly6(r, smoothing_length)
-        masses[i] = 10* rest_density / total_w if total_w > 1e-9 else 0.0
+        masses[i] = 10 * rest_density / total_w if total_w > 1e-9 else 0.0
 
     return masses
