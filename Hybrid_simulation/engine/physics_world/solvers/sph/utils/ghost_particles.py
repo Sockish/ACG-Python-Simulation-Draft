@@ -51,7 +51,7 @@ def sample_mesh_surface(
 
     sample_spacing = max(1e-5, 0.3 * smoothing_length)
     if layer_offsets is None:
-        layer_offsets = (0.1 * smoothing_length, -0.05 * smoothing_length)
+        layer_offsets = (0.1 * smoothing_length, -0.1 * smoothing_length)
 
     samples: List[Tuple[Vec3, Vec3]] = []
 
@@ -132,6 +132,6 @@ def compute_local_pseudo_masses(
                         pos_j = positions[neighbor_idx]
                         r = length(sub(pos_i, pos_j))
                         total_w += poly6(r, smoothing_length)
-        masses[i] = 10 * rest_density / total_w if total_w > 1e-9 else 0.0
+        masses[i] =  rest_density / total_w if total_w > 1e-9 else 0.0
 
     return masses

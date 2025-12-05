@@ -31,6 +31,7 @@ class LiquidBoxConfig:
     particle_spacing: float  # meters (m)
     rest_density: float  # kilograms per cubic meter (kg/m^3)
     smoothing_length: float  # meters (m)
+    initial_velocity: Sequence[float]  # meters per second (m/s)
 
 
 @dataclass

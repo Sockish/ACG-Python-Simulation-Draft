@@ -45,12 +45,12 @@ class WCSphSolver:
         self,
         liquid_box: LiquidBoxConfig,
         gravity: Vec3,
-        kappa: float = 600.0,
-        gamma: float = 7.0,
+        kappa: float = 3000.0,
+        gamma: float = 5.0,
         viscosity_alpha: float = 0.05,
-        surface_tension_kappa: float = 0.00073,
+        surface_tension_kappa: float = 0.0073,
         eps: float = 1e-6,
-        noise_amplitude: float = 0.0003,
+        noise_amplitude: float = 0.003,
         noise_seed: Optional[int] = None,
     ):
         self.liquid_box = liquid_box
@@ -62,6 +62,7 @@ class WCSphSolver:
         self.noise_amplitude = noise_amplitude
         self._noise_rng = Random(noise_seed)
         self.surface_tension_kappa = surface_tension_kappa
+        self.initial_velocity = _seq_to_vec3(liquid_box.initial_velocity)
         
         # Initialize derived properties from config
         self.bounds_min = _seq_to_vec3(self.liquid_box.min_corner)
@@ -96,7 +97,7 @@ class WCSphSolver:
                             z + self._noise_rng.uniform(-self.noise_amplitude, self.noise_amplitude),
                         )
                     )
-                    velocities.append((0.0, 0.0, 0.0))
+                    velocities.append(self.initial_velocity)
                     densities.append(self.liquid_box.rest_density)
                     pressures.append(0.0)
                     z += spacing
@@ -194,7 +195,8 @@ class WCSphSolver:
             pressures,
             fluid.particle_mass,
             h,
-            neighbors
+            neighbors,
+            boundary_neighbor_lists,
         )
 
         # 4.5) Surface tension
