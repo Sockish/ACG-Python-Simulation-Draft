@@ -14,7 +14,7 @@ from .solvers.sph.utils.ghost_particles import sample_mesh_surface, compute_loca
 
 from ..configuration import SceneConfig
 from ..mesh_utils import load_obj_mesh, triangulate_faces
-from .math_utils import Vec3
+from .math_utils import Vec3, quaternion_to_matrix, transform_point
 from .state import FluidState, RigidBodyState, StaticBodyState, WorldSnapshot
 from .solvers import (
     RigidBodySolver,
@@ -42,7 +42,59 @@ class PhysicsWorld:
     def from_config(cls, config: SceneConfig) -> "PhysicsWorld":
         gravity = _vec(config.simulation.gravity)
         
-        # Initialize fluid solver only if liquid_box is defined
+        # ==== STEP 1: Initialize rigid and static bodies FIRST (before fluid) ====
+        
+        # Initialize rigid body solver and states
+        rigid_solver = RigidBodySolver(config.rigid_bodies, gravity)
+        rigid_rigid_solver = RigidRigidSolver()
+        rigid_static_solver = RigidStaticSolver()
+        rigid_states = rigid_solver.initialize()
+        
+        # Initialize static bodies with proper transformations
+        static_states = []
+        for body in config.static_bodies:
+            mesh = load_obj_mesh(body.mesh_path)
+            triangles = triangulate_faces(mesh.faces)
+            
+            # Apply initial_position and initial_orientation transformation
+            initial_pos = _vec(body.initial_position)
+            initial_ori = tuple(body.initial_orientation)
+            rotation_matrix = quaternion_to_matrix(initial_ori)
+            
+            # Transform all vertices from local OBJ space to world space
+            transformed_vertices = [
+                transform_point(v, rotation_matrix, initial_pos)
+                for v in mesh.vertices
+            ]
+            
+            # Compute transformed bounds
+            if transformed_vertices:
+                xs = [v[0] for v in transformed_vertices]
+                ys = [v[1] for v in transformed_vertices]
+                zs = [v[2] for v in transformed_vertices]
+                world_min = (min(xs), min(ys), min(zs))
+                world_max = (max(xs), max(ys), max(zs))
+            else:
+                world_min, world_max = mesh.bounds()
+            
+            print(f"[StaticInit] {body.name}: pos={initial_pos}, ori={initial_ori}")
+            print(f"  Original bounds: {mesh.bounds()}")
+            print(f"  Transformed bounds: {world_min} to {world_max}")
+            
+            static_states.append(
+                StaticBodyState(
+                    name=body.name,
+                    mesh_path=body.mesh_path,
+                    position=initial_pos,  # Store the applied transformation
+                    orientation=initial_ori,  # Store the applied transformation
+                    local_bounds_min=world_min,  # Now these are world-space bounds
+                    local_bounds_max=world_max,  # Now these are world-space bounds
+                    vertices=transformed_vertices,  # Already in world space
+                    faces=triangles,
+                )
+            )
+        
+        # ==== STEP 2: Initialize fluid solver AFTER rigid/static bodies are ready ====
         if config.liquid_box:
             fluid_solver = WCSphSolver(
                 liquid_box=config.liquid_box,
@@ -51,35 +103,6 @@ class PhysicsWorld:
         else:
             fluid_solver = None
             fluid_state = None
-        # fluid_rigid_solver = FluidRigidCouplingSolver()
-        # fluid_static_solver = FluidStaticSolver() 
-
-
-        rigid_solver = RigidBodySolver(config.rigid_bodies, gravity)
-        rigid_rigid_solver = RigidRigidSolver()
-        #fluid_rigid_solver = FluidRigidCouplingSolver()
-        #fluid_static_solver = FluidStaticSolver()
-        rigid_static_solver = RigidStaticSolver()
-
-        rigid_states = rigid_solver.initialize()
-        static_states = []
-        for body in config.static_bodies:
-            mesh = load_obj_mesh(body.mesh_path)
-            local_min, local_max = mesh.bounds()
-            triangles = triangulate_faces(mesh.faces)
-            
-            static_states.append(
-                StaticBodyState(
-                    name=body.name,
-                    mesh_path=body.mesh_path,
-                    position=_vec(body.initial_position),  # Should be (0,0,0)
-                    orientation=tuple(body.initial_orientation),  # Should be (0,0,0,1)
-                    local_bounds_min=local_min,
-                    local_bounds_max=local_max,
-                    vertices=mesh.vertices,
-                    faces=triangles,
-                )
-            )
 
         smoothing_length = fluid_solver.smoothing_length if fluid_solver else None
         rest_density = fluid_solver.liquid_box.rest_density if fluid_solver else None

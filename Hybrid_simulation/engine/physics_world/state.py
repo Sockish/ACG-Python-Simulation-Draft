@@ -82,19 +82,19 @@ class RigidBodyState:
 class StaticBodyState:
     name: str
     mesh_path: Path
-    position: Vec3  # world-space reference position in meters (m) - always (0,0,0) for absolute coordinates
-    orientation: Quaternion  # unit quaternion - always (0,0,0,1) for no rotation
-    local_bounds_min: Vec3  # meters (m) - bounds from OBJ file
-    local_bounds_max: Vec3  # meters (m) - bounds from OBJ file
-    vertices: List[Vec3]  # All vertices in world space
+    position: Vec3  # world-space reference position (applied during initialization)
+    orientation: Quaternion  # unit quaternion (applied during initialization)
+    local_bounds_min: Vec3  # meters (m) - world-space bounds (already transformed)
+    local_bounds_max: Vec3  # meters (m) - world-space bounds (already transformed)
+    vertices: List[Vec3]  # All vertices already transformed to world space
     faces: List[Tuple[int, int, int]]  # Triangle indices (v0, v1, v2)
-    ghost_positions: List[Vec3] = field(default_factory=list)
-    ghost_normals: List[Vec3] = field(default_factory=list)
+    ghost_positions: List[Vec3] = field(default_factory=list)  # Already in world space
+    ghost_normals: List[Vec3] = field(default_factory=list)  # Already in world space
     ghost_pseudo_masses: List[float] = field(default_factory=list)
 
     @property
     def world_bounds(self) -> tuple[Vec3, Vec3]:
-        # Static bodies use absolute coordinates from OBJ, no transformation needed
+        # Bounds are already in world space after initialization transformation
         return self.local_bounds_min, self.local_bounds_max
     
     def get_triangle(self, face_idx: int) -> Tuple[Vec3, Vec3, Vec3]:

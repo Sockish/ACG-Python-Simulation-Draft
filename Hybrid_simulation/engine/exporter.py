@@ -103,13 +103,13 @@ class SimulationExporter:
         mesh = self._get_mesh(body.mesh_path)
         rotation = quaternion_to_matrix(body.orientation)
 
-        # RigidBody: use centered_vertices; StaticBody: use original vertices
+        # RigidBody: use centered_vertices; StaticBody: use transformed vertices
         if hasattr(body, 'centered_vertices'):
-            # Rigid body - transform centered vertices
+            # Rigid body - transform centered vertices from local to world space
             transformed = [transform_point(v, rotation, body.position) for v in body.centered_vertices]
         else:
-            # Static body - use absolute coordinates from OBJ
-            transformed = mesh.vertices
+            # Static body - vertices are already transformed to world space during initialization
+            transformed = body.vertices
 
         with path.open("w", encoding="utf-8") as handle:
             handle.write(f"# Exported by SimulationExporter\n")
