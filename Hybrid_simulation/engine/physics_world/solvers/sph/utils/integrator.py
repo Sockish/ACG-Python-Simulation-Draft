@@ -49,7 +49,7 @@ def integrate_symplectic(
         new_velocities[i] = v_new
         
         # x(t+dt) = x(t) + dt * v(t+dt)
-        x_new = add(positions[i], mul(v_new, dt))
+        x_new = add(positions[i], mul(v_new, dt * force_damp))
         new_positions[i] = x_new
         
         if i < 5:  # Print first 5 particles for debugging

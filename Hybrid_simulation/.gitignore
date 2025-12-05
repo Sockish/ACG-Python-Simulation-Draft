@@ -1,4 +1,6 @@
 outputs/
+outputs*/
+outputs_pure_liquid/
 __pycache__/
 *.pyc
 *.pyo

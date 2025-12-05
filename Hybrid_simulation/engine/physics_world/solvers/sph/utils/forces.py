@@ -1,6 +1,9 @@
 """SPH pressure forces."""
-from typing import List, Tuple
+from typing import List, Tuple, Optional, TYPE_CHECKING
 from .kernels import spiky_grad
+
+if TYPE_CHECKING:
+    from .neighborhood import BoundarySample
 
 Vec3 = Tuple[float, float, float]
 
@@ -19,9 +22,13 @@ def compute_pressure_forces(
     pressures: List[float],
     mass: float,
     h: float,
-    neighbors: List[List[int]]
+    neighbors: List[List[int]],
+    boundary_neighbors: Optional[List[List["BoundarySample"]]] = None,
 ) -> List[Vec3]:
-    """Compute pressure force f_i = -m_i sum_j m_j (p_i/rho_i^2 + p_j/rho_j^2) grad W_ij."""
+    """Compute pressure force f_i = -m_i sum_j m_j (p_i/rho_i^2 + p_j/rho_j^2) grad W_ij.
+    
+    Includes boundary contributions to prevent leaking through walls.
+    """
     n = len(positions)
     forces = [(0.0, 0.0, 0.0)] * n
     
@@ -57,6 +64,16 @@ def compute_pressure_forces(
             
             f_pair = mul(grad_w, scalar)
             f_i = add(f_i, f_pair)
+        
+        # Boundary pressure forces (ghost particles have p=0, so only fluid pressure term)
+        if boundary_neighbors:
+            for sample in boundary_neighbors[i]:
+                r_vec = sub(p_i, sample.position)
+                grad_w = spiky_grad(r_vec, h)
+                # f_i += -m_i * Ψ_b * (p_i/rho_i^2 + 0) * grad W_ib
+                scalar = -mass * sample.pseudo_mass * term_i
+                f_boundary = mul(grad_w, scalar)
+                f_i = add(f_i, f_boundary)
             
         forces[i] = f_i
         
