@@ -1,7 +1,18 @@
-"""Splashsurf-based surface reconstruction utilities."""
+"""Splashsurf-based surface reconstruction utilities.
+
+Outputs reconstructed surfaces to a clean show_frames directory for Blender rendering:
+  outputs/show_frames/
+  ├── 00000/          # Renamed sequentially (0, 1, 2, ...) for video export
+  │   ├── container.obj
+  │   ├── liquid_surface.obj
+  │   └── (other bodies)
+  ├── 00001/
+  ...
+"""
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,17 +35,21 @@ from tqdm import tqdm
 class ReconstructionJob:
     """Represents a single particle->surface reconstruction call."""
 
-    step_index: int
+    step_index: int          # Original simulation step
+    output_index: int        # Sequential output frame number (0, 1, 2, ...)
     particle_file: Path
     surface_file: Path
+    source_frame_dir: Path   # Original frame directory to copy other objects from
+    output_frame_dir: Path   # Output directory in show_frames
 
 
 @dataclass
 class SplashsurfReconstructor:
     config: SceneConfig
     splashsurf_cmd: str = "splashsurf"
-    output_dir: Path | None = None
+    output_dir: Path | None = None  # If None, outputs to show_frames/
     output_format: str = "obj"
+    surface_mesh_name: str = "liquid_surface"  # Name for the output mesh (for Blender material matching)
     smoothing_length_multiplier: float | None = None  # multiples of particle radius
     particle_radius: float | None = None  # meters
     cube_size_multiplier: float = 0.5
@@ -49,13 +64,17 @@ class SplashsurfReconstructor:
     def __post_init__(self) -> None:
         export = self.config.export
         if export is None:
-            output_root = Path("outputs")
-            self.fluid_dir = output_root / "fluid"
+            self.output_root = Path("outputs")
+            self.fluid_dir = self.output_root / "fluid"
+            self.frames_dir = self.output_root / "frames"
         else:
-            output_root = export.output_root
+            self.output_root = export.output_root
             self.fluid_dir = export.fluid_dir()
-        self.surface_dir = (self.output_dir or (output_root / "surface")).resolve()
-        self.surface_dir.mkdir(parents=True, exist_ok=True)
+            self.frames_dir = self.output_root / "frames"
+        
+        # show_frames is the clean output directory with only selected frames
+        self.show_frames_dir = self.output_dir or (self.output_root / "show_frames")
+        
         spacing = float(self.config.liquid_box.particle_spacing)
         if self.particle_radius is None:
             self.particle_radius = spacing * 0.5
@@ -89,7 +108,10 @@ class SplashsurfReconstructor:
         frame_stride: int | None = None,
         target_fps: float | None = None,
     ) -> List[ReconstructionJob]:
-        """Run Splashsurf for selected steps, optionally downsampling by stride or FPS."""
+        """Run Splashsurf for selected steps, optionally downsampling by stride or FPS.
+        
+        Creates a clean show_frames directory with sequentially numbered frames.
+        """
 
         indices = list(steps) if steps else self.available_steps()
         if not indices:
@@ -110,18 +132,54 @@ class SplashsurfReconstructor:
                 raise ValueError("frame_stride must be positive if provided.")
             indices = indices[::frame_stride]
 
-        jobs = [self._build_job(step) for step in indices]
+        # Clean and recreate show_frames directory
+        if self.show_frames_dir.exists():
+            shutil.rmtree(self.show_frames_dir)
+        self.show_frames_dir.mkdir(parents=True, exist_ok=True)
+        
+        print(f"Output directory: {self.show_frames_dir}")
+        print(f"Processing {len(indices)} frames (stride={frame_stride or 1})")
+
+        jobs = [self._build_job(step, output_idx) for output_idx, step in enumerate(indices)]
         for job in tqdm(jobs, desc="Reconstructing surfaces"):
-            self._run_splashsurf(job)
+            self._process_frame(job)
         return jobs
 
-    def _build_job(self, step: int) -> ReconstructionJob:
+    def _build_job(self, step: int, output_index: int) -> ReconstructionJob:
         particle = self.fluid_dir / f"fluid_{step:05d}.ply"
         if not particle.exists():
             raise FileNotFoundError(f"Particle file not found for step {step}: {particle}")
+        
         suffix = f".{self.output_format.lstrip('.') or 'obj'}"
-        surface = self.surface_dir / f"liquid_surface_{step:05d}{suffix}"
-        return ReconstructionJob(step, particle, surface)
+        
+        # Source frame directory (from simulation export)
+        source_frame_dir = self.frames_dir / f"{step:05d}"
+        
+        # Output frame directory (sequential numbering for video export)
+        output_frame_dir = self.show_frames_dir / f"{output_index:05d}"
+        output_frame_dir.mkdir(parents=True, exist_ok=True)
+        
+        surface = output_frame_dir / f"{self.surface_mesh_name}{suffix}"
+        
+        return ReconstructionJob(
+            step_index=step,
+            output_index=output_index,
+            particle_file=particle,
+            surface_file=surface,
+            source_frame_dir=source_frame_dir,
+            output_frame_dir=output_frame_dir,
+        )
+
+    def _process_frame(self, job: ReconstructionJob) -> None:
+        """Process a single frame: copy existing objects and reconstruct surface."""
+        # Copy all existing .obj files from source frame directory
+        if job.source_frame_dir.exists():
+            for obj_file in job.source_frame_dir.glob("*.obj"):
+                dest = job.output_frame_dir / obj_file.name
+                shutil.copy2(obj_file, dest)
+        
+        # Run surface reconstruction
+        self._run_splashsurf(job)
 
     def _run_splashsurf(self, job: ReconstructionJob) -> None:
         command = [self.splashsurf_cmd, "reconstruct", str(job.particle_file)]

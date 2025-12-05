@@ -120,7 +120,7 @@ def load_scene_config(config_path: str | Path) -> SceneConfig:
             initial_linear_velocity=entry.get("initial_linear_velocity", (0.0, 0.0, 0.0)),
             initial_angular_velocity=entry.get("initial_angular_velocity", (0.0, 0.0, 0.0)),
         )
-        for entry in raw.get("rigid_bodies", [])
+        for entry in (raw.get("rigid_bodies") or [])
     ]
 
     static_bodies = [
@@ -130,7 +130,7 @@ def load_scene_config(config_path: str | Path) -> SceneConfig:
             initial_position=entry.get("initial_position", (0.0, 0.0, 0.0)),
             initial_orientation=entry.get("initial_orientation", (0.0, 0.0, 0.0, 1.0)),
         )
-        for entry in raw.get("static_bodies", [])
+        for entry in (raw.get("static_bodies") or [])
     ]
 
     export_cfg = raw.get("export")
