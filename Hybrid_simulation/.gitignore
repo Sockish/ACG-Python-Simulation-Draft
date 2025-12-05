@@ -4,6 +4,10 @@ __pycache__/
 *.pyo
 *.pyd
 env/
-venv/
+venv/``
 .venv/
 build/
+output/
+outputsnai/
+output*/
+outputnai/
