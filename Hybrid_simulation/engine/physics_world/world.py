@@ -11,6 +11,7 @@ except ImportError:  # pragma: no cover - fallback when tqdm is missing
 
 from .solvers.sph.WCSPH import WCSphSolver
 from .solvers.sph.utils.ghost_particles import sample_mesh_surface, compute_local_pseudo_masses
+from .solvers.sph.taichi_ghost_sampler import TaichiGhostSampler
 
 from ..configuration import SceneConfig
 from ..mesh_utils import load_obj_mesh, triangulate_faces
@@ -39,7 +40,7 @@ class PhysicsWorld:
     current_step: int = 0
 
     @classmethod
-    def from_config(cls, config: SceneConfig) -> "PhysicsWorld":
+    def from_config(cls, config: SceneConfig, use_taichi: bool = False) -> "PhysicsWorld":
         gravity = _vec(config.simulation.gravity)
         
         # ==== STEP 1: Initialize rigid and static bodies FIRST (before fluid) ====
@@ -96,9 +97,19 @@ class PhysicsWorld:
         
         # ==== STEP 2: Initialize fluid solver AFTER rigid/static bodies are ready ====
         if config.liquid_box:
-            fluid_solver = WCSphSolver(
-                liquid_box=config.liquid_box,
-                gravity=gravity)
+            if use_taichi:
+                # Use Taichi-accelerated solver
+                from .solvers.sph.taichi_adapter import TaichiSolverAdapter
+                print("[PhysicsWorld] Using Taichi SPH solver")
+                fluid_solver = TaichiSolverAdapter(
+                    liquid_box=config.liquid_box,
+                    gravity=gravity,
+                )
+            else:
+                # Use original Numba solver
+                fluid_solver = WCSphSolver(
+                    liquid_box=config.liquid_box,
+                    gravity=gravity)
             fluid_state = fluid_solver.initialize()
         else:
             fluid_solver = None
@@ -107,38 +118,61 @@ class PhysicsWorld:
         smoothing_length = fluid_solver.smoothing_length if fluid_solver else None
         rest_density = fluid_solver.liquid_box.rest_density if fluid_solver else None
         if smoothing_length and rest_density:
-            print(
-                f"[GhostInit] h={smoothing_length:.4f}, rho0={rest_density:.2f}"
-            )
+            # Use GPU sampler for Taichi, CPU for WCSPH
+            if use_taichi:
+                print(f"[GhostInit] Using Taichi GPU sampler | h={smoothing_length:.4f}, rho0={rest_density:.2f}")
+                import sys
+                sys.stdout.flush()
+                sampler = TaichiGhostSampler()
+                sample_func = sampler.sample_mesh_surface
+                mass_func = sampler.compute_local_pseudo_masses
+            else:
+                print(f"[GhostInit] Using NumPy CPU sampler | h={smoothing_length:.4f}, rho0={rest_density:.2f}")
+                import sys
+                sys.stdout.flush()
+                sample_func = sample_mesh_surface
+                mass_func = compute_local_pseudo_masses
+            
+            print(f"[GhostInit] Starting rigid body sampling ({len(rigid_states)} bodies)...")
+            sys.stdout.flush()
             for rigid in rigid_states:
-                samples = sample_mesh_surface(rigid.centered_vertices, rigid.triangles, smoothing_length)
+                print(f"  [GhostInit][Rigid:{rigid.name}] Sampling {len(rigid.triangles)} triangles...")
+                sys.stdout.flush()
+                samples = sample_func(rigid.centered_vertices, rigid.triangles, smoothing_length)
                 rigid.ghost_local_positions = [pos for pos, _ in samples]
                 rigid.ghost_local_normals = [normal for _, normal in samples]
-                rigid.ghost_pseudo_masses = compute_local_pseudo_masses(
+                print(f"  [GhostInit][Rigid:{rigid.name}] Computing masses for {len(rigid.ghost_local_positions)} samples...")
+                sys.stdout.flush()
+                rigid.ghost_pseudo_masses = mass_func(
                     rigid.ghost_local_positions,
                     smoothing_length,
                     rest_density,
                 )
-                print(
-                    f"  [GhostInit][Rigid:{rigid.name}] samples={len(rigid.ghost_local_positions)}"
-                )
+                print(f"  [GhostInit][Rigid:{rigid.name}] Complete: {len(rigid.ghost_local_positions)} samples")
+                sys.stdout.flush()
+            
+            print(f"[GhostInit] Starting static body sampling ({len(static_states)} bodies)...")
+            sys.stdout.flush()
             static_iterator = (
                 tqdm(static_states, desc="[GhostInit][Static] Sampling", unit="mesh")
                 if tqdm
                 else static_states
             )
             for static in static_iterator:
-                samples = sample_mesh_surface(static.vertices, static.faces, smoothing_length)
+                print(f"  [GhostInit][Static:{static.name}] Sampling {len(static.faces)} triangles...")
+                sys.stdout.flush()
+                samples = sample_func(static.vertices, static.faces, smoothing_length)
                 static.ghost_positions = [pos for pos, _ in samples]
                 static.ghost_normals = [normal for _, normal in samples]
-                static.ghost_pseudo_masses = compute_local_pseudo_masses(
+                print(f"  [GhostInit][Static:{static.name}] Computing masses for {len(static.ghost_positions)} samples...")
+                sys.stdout.flush()
+                static.ghost_pseudo_masses = mass_func(
                     static.ghost_positions,
                     smoothing_length,
                     rest_density,
                 )
-                print(
-                    f"  [GhostInit][Static:{static.name}] samples={len(static.ghost_positions)}"
-                )
+                print(f"  [GhostInit][Static:{static.name}] Complete: {len(static.ghost_positions)} samples")
+                sys.stdout.flush()
 
         return cls(
             config=config,

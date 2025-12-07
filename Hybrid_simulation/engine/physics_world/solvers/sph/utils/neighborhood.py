@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from typing import Dict, List, Literal, Optional, Tuple, Union
 
+import numpy as np
+
 from ....state import RigidBodyState, StaticBodyState
 from .ghost_particles import compute_local_pseudo_masses
 
@@ -55,6 +57,109 @@ def neighborhood_indices(i: int, positions: List[Vec3], grid: Dict[CellIndex, Li
                     neighbors.extend(grid[cell])
     # remove self
     return [n for n in neighbors if n != i]
+
+
+# Optional numba acceleration for neighborhood_indices using numpy arrays
+try:
+    import numba as nb
+except ImportError:  # pragma: no cover
+    nb = None
+
+
+def neighborhood_indices_numpy(positions: np.ndarray, cell_size: float):
+    """Build spatial hash and neighbor lists in numpy; returns (flat, offsets).
+
+    This avoids Python loops when numba is available. Fallback to Python if numba missing.
+    """
+    if nb is None:
+        # Fallback to Python lists
+        grid = build_hash([tuple(p) for p in positions], cell_size)
+        neighbors = [neighborhood_indices(i, [tuple(p) for p in positions], grid, cell_size) for i in range(len(positions))]
+        from .neighbor_flatten import flatten_neighbors
+
+        return flatten_neighbors(neighbors)
+
+    return _neighborhood_indices_numba(positions, cell_size)
+
+
+if nb:
+    @nb.njit(fastmath=True)
+    def _hash_index(px: float, py: float, pz: float, cell_size: float):
+        return int(px // cell_size), int(py // cell_size), int(pz // cell_size)
+
+
+    @nb.njit(fastmath=True)
+    def _build_grid_indices(positions: np.ndarray, cell_size: float):
+        n = positions.shape[0]
+        keys = np.empty((n, 3), dtype=np.int32)
+        for i in range(n):
+            keys[i, 0], keys[i, 1], keys[i, 2] = _hash_index(positions[i, 0], positions[i, 1], positions[i, 2], cell_size)
+        return keys
+
+
+    @nb.njit(fastmath=True)
+    def _neighbor_pairs(keys: np.ndarray):
+        # Very simple O(n^2) grouping by keys for compatibility; for large n consider better hashing
+        n = keys.shape[0]
+        counts = np.zeros(n, dtype=np.int32)
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    continue
+                if keys[i, 0] == keys[j, 0] and keys[i, 1] == keys[j, 1] and keys[i, 2] == keys[j, 2]:
+                    counts[i] += 1
+        offsets = np.zeros(n + 1, dtype=np.int32)
+        for i in range(n):
+            offsets[i + 1] = offsets[i] + counts[i]
+        flat = np.empty(offsets[-1], dtype=np.int32)
+        for i in range(n):
+            write = offsets[i]
+            for j in range(n):
+                if i == j:
+                    continue
+                if keys[i, 0] == keys[j, 0] and keys[i, 1] == keys[j, 1] and keys[i, 2] == keys[j, 2]:
+                    flat[write] = j
+                    write += 1
+        return flat, offsets
+
+
+    @nb.njit(parallel=True, fastmath=True)
+    def _expand_neighbors_same_cell(keys: np.ndarray, cell_size: float):
+        # 3x3x3 search using same-cell grouping as approximation; still O(n^2) but in numba
+        n = keys.shape[0]
+        counts = np.zeros(n, dtype=np.int32)
+        for i in nb.prange(n):
+            ci0, ci1, ci2 = keys[i, 0], keys[i, 1], keys[i, 2]
+            cnt = 0
+            for j in range(n):
+                if i == j:
+                    continue
+                dj0, dj1, dj2 = keys[j, 0], keys[j, 1], keys[j, 2]
+                if abs(ci0 - dj0) <= 1 and abs(ci1 - dj1) <= 1 and abs(ci2 - dj2) <= 1:
+                    cnt += 1
+            counts[i] = cnt
+
+        offsets = np.zeros(n + 1, dtype=np.int32)
+        for i in range(n):
+            offsets[i + 1] = offsets[i] + counts[i]
+        flat = np.empty(offsets[-1], dtype=np.int32)
+
+        for i in nb.prange(n):
+            ci0, ci1, ci2 = keys[i, 0], keys[i, 1], keys[i, 2]
+            write = offsets[i]
+            for j in range(n):
+                if i == j:
+                    continue
+                dj0, dj1, dj2 = keys[j, 0], keys[j, 1], keys[j, 2]
+                if abs(ci0 - dj0) <= 1 and abs(ci1 - dj1) <= 1 and abs(ci2 - dj2) <= 1:
+                    flat[write] = j
+                    write += 1
+        return flat, offsets
+
+
+    def _neighborhood_indices_numba(positions: np.ndarray, cell_size: float):
+        keys = _build_grid_indices(positions, cell_size)
+        return _expand_neighbors_same_cell(keys, cell_size)
 
 
 def _collect_boundary_samples(

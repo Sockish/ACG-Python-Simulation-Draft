@@ -27,11 +27,13 @@ for device in bpy.context.preferences.addons['cycles'].preferences.devices:
     else:
         device.use = False
 
-
-
 # Get the .obj file path from command line arguments
 frame_dir = sys.argv[-2] # Assumes the frame directory is the second last argument
 output_image_path = sys.argv[-1]  # Assumes the output image path is the last argument
+
+# Set scene frame to drive camera/animation based on folder name (e.g., 00012)
+# frame_idx = int(os.path.basename(frame_dir))
+# bpy.context.scene.frame_set(frame_idx)
 
 # Print initial camera state before any object replacement
 print("\n[Initial Camera State]")
