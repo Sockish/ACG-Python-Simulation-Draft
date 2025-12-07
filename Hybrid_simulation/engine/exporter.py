@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .configuration import ExportConfig
 from .mesh_utils import OBJMesh, load_obj_mesh
@@ -111,27 +111,84 @@ class SimulationExporter:
             # Static body - vertices are already transformed to world space during initialization
             transformed = body.vertices
 
+        world_normals = self._rotate_normals(mesh.normals, rotation) if mesh.normals else []
+        uv_faces = mesh.uv_faces if mesh.uvs else []
+        normal_faces = mesh.normal_faces if mesh.normals else []
+
         with path.open("w", encoding="utf-8") as handle:
             handle.write(f"# Exported by SimulationExporter\n")
             handle.write(f"o {body.name}\n")
             for vx, vy, vz in transformed:
                 handle.write(f"v {vx:.6f} {vy:.6f} {vz:.6f}\n")
 
-            for face in mesh.faces:
-                if len(face) < 3:
-                    continue
-                for tri in self._triangulate(face):
-                    # Face indices are 1-based in OBJ format
-                    indices = [str(idx + 1) for idx in tri]
-                    handle.write(f"f {' '.join(indices)}\n")
+            if mesh.uvs:
+                for uv in mesh.uvs:
+                    handle.write("vt " + " ".join(f"{value:.6f}" for value in uv) + "\n")
 
-    def _triangulate(self, face: Sequence[int]) -> Iterable[Sequence[int]]:
-        if len(face) == 3:
-            yield face
+            if world_normals:
+                for nx, ny, nz in world_normals:
+                    handle.write(f"vn {nx:.6f} {ny:.6f} {nz:.6f}\n")
+
+            for face_index, face in enumerate(mesh.faces):
+                uv_face = uv_faces[face_index] if uv_faces else None
+                normal_face = normal_faces[face_index] if normal_faces else None
+                self._write_face(handle, face, uv_face, normal_face)
+
+    def _triangle_index_fan(self, vertex_count: int) -> Iterable[Tuple[int, int, int]]:
+        if vertex_count < 3:
             return
-        root = face[0]
-        for i in range(1, len(face) - 1):
-            yield (root, face[i], face[i + 1])
+        root = 0
+        if vertex_count == 3:
+            yield (0, 1, 2)
+            return
+        for i in range(1, vertex_count - 1):
+            yield (root, i, i + 1)
+
+    def _write_face(
+        self,
+        handle,
+        face_vertices: Sequence[int],
+        uv_indices: Optional[Sequence[Optional[int]]],
+        normal_indices: Optional[Sequence[Optional[int]]],
+    ) -> None:
+        vertex_count = len(face_vertices)
+        if vertex_count < 3:
+            return
+        for tri in self._triangle_index_fan(vertex_count) or []:
+            v_idx = [face_vertices[pos] for pos in tri]
+            vt_idx = (
+                [uv_indices[pos] if uv_indices is not None else None for pos in tri]
+                if uv_indices is not None
+                else None
+            )
+            vn_idx = (
+                [normal_indices[pos] if normal_indices is not None else None for pos in tri]
+                if normal_indices is not None
+                else None
+            )
+            tokens: List[str] = []
+            for i in range(3):
+                tokens.append(self._format_face_token(v_idx[i], vt_idx[i] if vt_idx else None, vn_idx[i] if vn_idx else None))
+            handle.write(f"f {' '.join(tokens)}\n")
+
+    def _format_face_token(self, vertex: int, uv: Optional[int], normal: Optional[int]) -> str:
+        v = vertex + 1
+        vt = uv + 1 if uv is not None else None
+        vn = normal + 1 if normal is not None else None
+        if vt is None and vn is None:
+            return f"{v}"
+        if vt is None:
+            return f"{v}//{vn}"
+        if vn is None:
+            return f"{v}/{vt}"
+        return f"{v}/{vt}/{vn}"
+
+    def _rotate_normals(
+        self,
+        normals: Sequence[Tuple[float, float, float]],
+        rotation: Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float]],
+    ) -> List[Tuple[float, float, float]]:
+        return [transform_point(normal, rotation, (0.0, 0.0, 0.0)) for normal in normals]
 
     def _get_mesh(self, path: Path) -> OBJMesh:
         resolved = path.expanduser().resolve()

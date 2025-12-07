@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import sqrt
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 Vec3 = Tuple[float, float, float]
+UVCoord = Tuple[float, ...]
 
 
 @dataclass
 class OBJMesh:
     vertices: List[Vec3]
     faces: List[Tuple[int, ...]]
+    uvs: List[UVCoord] = field(default_factory=list)
+    uv_faces: List[Tuple[Optional[int], ...]] = field(default_factory=list)
+    normals: List[Vec3] = field(default_factory=list)
+    normal_faces: List[Tuple[Optional[int], ...]] = field(default_factory=list)
 
     def bounds(self) -> Tuple[Vec3, Vec3]:
         if not self.vertices:
@@ -38,6 +43,10 @@ def load_obj_mesh(path: Path) -> OBJMesh:
 
     vertices: List[Vec3] = []
     faces: List[Tuple[int, ...]] = []
+    uvs: List[UVCoord] = []
+    uv_faces: List[Tuple[Optional[int], ...]] = []
+    normals: List[Vec3] = []
+    normal_faces: List[Tuple[Optional[int], ...]] = []
 
     if path.exists():
         with path.open("r", encoding="utf-8", errors="ignore") as handle:
@@ -48,20 +57,45 @@ def load_obj_mesh(path: Path) -> OBJMesh:
                 if line.startswith("v "):
                     parts = line.split()
                     vertices.append((float(parts[1]), float(parts[2]), float(parts[3])))
+                elif line.startswith("vt "):
+                    parts = line.split()
+                    coords = tuple(float(value) for value in parts[1:])
+                    if coords:
+                        uvs.append(coords)
+                elif line.startswith("vn "):
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        normals.append((float(parts[1]), float(parts[2]), float(parts[3])))
                 elif line.startswith("f "):
                     parts = line.split()[1:]
-                    indices: List[int] = []
+                    v_indices: List[int] = []
+                    uv_indices: List[Optional[int]] = []
+                    normal_indices: List[Optional[int]] = []
                     for token in parts:
-                        idx = token.split("/")[0]
-                        if not idx:
+                        tokens = token.split("/")
+                        v_idx = int(tokens[0]) - 1 if tokens and tokens[0] else None
+                        vt_idx = int(tokens[1]) - 1 if len(tokens) > 1 and tokens[1] else None
+                        vn_idx = int(tokens[2]) - 1 if len(tokens) > 2 and tokens[2] else None
+                        if v_idx is None:
                             continue
-                        indices.append(int(idx) - 1)
-                    if len(indices) >= 3:
-                        faces.append(tuple(indices))
+                        v_indices.append(v_idx)
+                        uv_indices.append(vt_idx)
+                        normal_indices.append(vn_idx)
+                    if len(v_indices) >= 3:
+                        faces.append(tuple(v_indices))
+                        uv_faces.append(tuple(uv_indices))
+                        normal_faces.append(tuple(normal_indices))
     else:
         raise FileNotFoundError(f"OBJ mesh file not found: {path}")
 
-    mesh = OBJMesh(vertices=vertices, faces=faces)
+    mesh = OBJMesh(
+        vertices=vertices,
+        faces=faces,
+        uvs=uvs,
+        uv_faces=uv_faces,
+        normals=normals,
+        normal_faces=normal_faces,
+    )
     _mesh_cache[path] = mesh
     return mesh
 

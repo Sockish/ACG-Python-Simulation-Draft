@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from typing import Iterable, List, Sequence, Tuple, Dict
 from tqdm import tqdm
+import numpy as np
 
 from ....math_utils import Vec3, add, cross, length, mul, normalize, sub
 from .kernels import poly6
@@ -105,33 +106,71 @@ def compute_local_pseudo_masses(
     if smoothing_length <= 0.0 or rest_density <= 0.0 or count == 0:
         return [0.0] * count
 
+    # Convert to numpy array for vectorized operations
+    pos_array = np.array(positions, dtype=np.float32)
     cell_size = smoothing_length
-    grid: Dict[Tuple[int, int, int], List[int]] = {}
+    
+    # Compute cell indices for all positions at once
+    cell_indices = np.floor(pos_array / cell_size).astype(np.int32)
+    
+    # Build spatial hash grid
+    grid: Dict[Tuple[int, int, int], np.ndarray] = {}
+    for idx in range(count):
+        cell = tuple(cell_indices[idx])
+        if cell not in grid:
+            grid[cell] = []
+        grid[cell].append(idx)
+    
+    # Convert lists to numpy arrays for faster indexing
+    for cell in grid:
+        grid[cell] = np.array(grid[cell], dtype=np.int32)
+    
+    # Precompute poly6 kernel coefficient
+    h9 = smoothing_length ** 9
+    h2 = smoothing_length * smoothing_length
+    poly6_coef = 315.0 / (64.0 * np.pi * h9)
+    
+    masses = np.zeros(count, dtype=np.float32)
+    
+    # Process in batches for better cache performance
+    batch_size = 1024
+    num_batches = (count + batch_size - 1) // batch_size
+    
+    for batch_idx in tqdm(range(num_batches), desc="Computing masses"):
+        start_idx = batch_idx * batch_size
+        end_idx = min(start_idx + batch_size, count)
+        batch_cells = cell_indices[start_idx:end_idx]
+        
+        for local_i, i in enumerate(range(start_idx, end_idx)):
+            ci, cj, ck = batch_cells[local_i]
+            pos_i = pos_array[i]
+            total_w = 0.0
+            
+            # Check 27 neighboring cells
+            for di in (-1, 0, 1):
+                for dj in (-1, 0, 1):
+                    for dk in (-1, 0, 1):
+                        cell = (ci + di, cj + dj, ck + dk)
+                        if cell not in grid:
+                            continue
+                        
+                        neighbor_indices = grid[cell]
+                        if len(neighbor_indices) == 0:
+                            continue
+                        
+                        # Vectorized distance computation for all neighbors in this cell
+                        neighbor_positions = pos_array[neighbor_indices]
+                        diff = neighbor_positions - pos_i
+                        r_squared = np.sum(diff * diff, axis=1)
+                        
+                        # Vectorized poly6 kernel computation
+                        # Only compute for r < h (i.e., r^2 < h^2)
+                        valid_mask = r_squared < h2
+                        if np.any(valid_mask):
+                            h2_minus_r2 = h2 - r_squared[valid_mask]
+                            kernel_values = poly6_coef * (h2_minus_r2 ** 3)
+                            total_w += np.sum(kernel_values)
+            
+            masses[i] = rest_density / total_w if total_w > 1e-9 else 0.0
 
-    def _cell_index(pos: Vec3) -> Tuple[int, int, int]:
-        return (
-            int(pos[0] // cell_size),
-            int(pos[1] // cell_size),
-            int(pos[2] // cell_size),
-        )
-
-    for idx, pos in enumerate(positions):
-        grid.setdefault(_cell_index(pos), []).append(idx)
-
-    masses: List[float] = [0.0] * count
-    for i, pos_i in tqdm(enumerate(positions), total=len(positions), desc="Computing masses"):
-        ci, cj, ck = _cell_index(pos_i)
-        total_w = 0.0
-        for di in (-1, 0, 1):
-            for dj in (-1, 0, 1):
-                for dk in (-1, 0, 1):
-                    cell = (ci + di, cj + dj, ck + dk)
-                    if cell not in grid:
-                        continue
-                    for neighbor_idx in grid[cell]:
-                        pos_j = positions[neighbor_idx]
-                        r = length(sub(pos_i, pos_j))
-                        total_w += poly6(r, smoothing_length)
-        masses[i] =  rest_density / total_w if total_w > 1e-9 else 0.0
-
-    return masses
+    return masses.tolist()
