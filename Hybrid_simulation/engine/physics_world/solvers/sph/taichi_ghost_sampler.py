@@ -207,7 +207,7 @@ class TaichiGhostSampler:
         if smoothing_length <= 0.0 or len(triangles) == 0:
             return []
         
-        sample_spacing = max(1e-5, 0.3 * smoothing_length)
+        sample_spacing = max(1e-5, 0.1 * smoothing_length)
         if layer_offsets is None:
             layer_offsets = (0.1 * smoothing_length, -0.1 * smoothing_length)
         

@@ -26,7 +26,7 @@ class TaichiSolverAdapter:
         viscosity_alpha: float = 0.25,
         boundary_friction_sigma: float = 4.0,
         surface_tension_kappa: float = 0.15,
-        max_particles: Optional[int] = None,        max_boundary_particles: int = 300000,        use_gpu: bool = True,
+        max_particles: Optional[int] = None,        max_boundary_particles: int = 20000000,        use_gpu: bool = True,
         noise_amplitude: float = 0.003,
         noise_seed: Optional[int] = None,
     ):
@@ -41,7 +41,7 @@ class TaichiSolverAdapter:
             boundary_friction_sigma: Boundary friction coefficient
             surface_tension_kappa: Surface tension coefficient
             max_particles: Maximum particle count (auto-estimated if None)
-            max_boundary_particles: Maximum ghost/boundary particles (default 300000)
+            max_boundary_particles: Maximum ghost/boundary particles (default 500000)
             use_gpu: Try to use GPU backend (falls back to CPU if unavailable)
             noise_amplitude: Initial position noise amplitude
             noise_seed: Random seed for noise
@@ -211,8 +211,23 @@ class TaichiSolverAdapter:
                             )
             
             total_boundary = self.taichi_solver.boundary_particles.n_particles[None]
-            print(f"[TaichiAdapter] Total boundary particles loaded: {total_boundary}")
-            self._boundaries_loaded = True
+            
+            # Only print on first load
+            if not hasattr(self, '_boundaries_loaded'):
+                print(f"[TaichiAdapter] Total boundary particles loaded: {total_boundary}")
+                # Print pseudo_mass statistics for debugging
+                if total_boundary > 0:
+                    masses_np = self.taichi_solver.boundary_particles.pseudo_masses.to_numpy()[:total_boundary]
+                    positions_np = self.taichi_solver.boundary_particles.positions.to_numpy()[:total_boundary]
+                    print(f"  [TaichiAdapter] Pseudo mass stats: min={masses_np.min():.6f}, max={masses_np.max():.6f}, avg={masses_np.mean():.6f}")
+                    print(f"  [TaichiAdapter] Position range: x=[{positions_np[:, 0].min():.2f}, {positions_np[:, 0].max():.2f}], "
+                          f"y=[{positions_np[:, 1].min():.2f}, {positions_np[:, 1].max():.2f}], "
+                          f"z=[{positions_np[:, 2].min():.2f}, {positions_np[:, 2].max():.2f}]")
+                    # Count zero masses
+                    zero_count = np.sum(masses_np < 1e-10)
+                    if zero_count > 0:
+                        print(f"  [WARNING] {zero_count}/{total_boundary} boundary particles have near-zero pseudo_mass!")
+                self._boundaries_loaded = True
         
         # Update rigid body ghost particle positions each step
         if rigids:
@@ -233,12 +248,20 @@ class TaichiSolverAdapter:
             self._step_count = 0
         self._step_count += 1
         
-        if self._step_count % 10 == 0:
+        if self._step_count % 100 == 0:
             densities_np = self.taichi_solver.get_densities()
             pressures_np = self.taichi_solver.pressures.to_numpy()[:len(densities_np)]
+            positions_np = self.taichi_solver.get_positions()
             print(f"[TaichiAdapter Step {self._step_count}]")
             print(f"  - Density range: [{densities_np.min():.2f}, {densities_np.max():.2f}], avg={densities_np.mean():.2f}")
             print(f"  - Pressure range: [{pressures_np.min():.2f}, {pressures_np.max():.2f}], avg={pressures_np.mean():.2f}")
+            print(f"  - Fluid position range: z=[{positions_np[:, 2].min():.3f}, {positions_np[:, 2].max():.3f}]")
+            
+            # Check for particles falling through floor
+            if positions_np[:, 2].min() < -1.0:
+                below_count = np.sum(positions_np[:, 2] < -1.0)
+                proportion = below_count / len(positions_np) * 100
+                print(f"  [WARNING] {below_count}/{len(positions_np)} particles below z=-1.0 (floor)! Proportion: {proportion:.2f}%")
         
         # Copy results back to FluidState
         positions_np = self.taichi_solver.get_positions()

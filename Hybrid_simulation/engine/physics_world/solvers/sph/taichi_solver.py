@@ -41,7 +41,7 @@ class TaichiWCSPHSolver:
         boundary_friction_sigma: float = 4.0,
         gravity: Tuple[float, float, float] = (0.0, 0.0, -9.81),
         grid_resolution: int = 64,
-        max_boundary_particles: int = 300000,
+        max_boundary_particles: int = 5000000,
         eps: float = 1e-6,
     ):
         """Initialize Taichi SPH solver.
@@ -143,9 +143,14 @@ class TaichiWCSPHSolver:
         print(f"[TaichiSPH] Loaded {n} particles")
     
     @ti.kernel
-    def compute_density_with_boundaries(self):
-        """Compute density including boundary contributions using spatial hash for both."""
+    def compute_density(self):
+        """Compute density for all particles using SPH summation.
+        
+        Includes both fluid-fluid and fluid-boundary contributions.
+        Boundary contributions are automatically skipped if n_boundary == 0.
+        """
         n = self.n_particles[None]
+        n_boundary = self.boundary_particles.n_particles[None]
         h = self.h
         mass = self.mass
         
@@ -173,134 +178,60 @@ class TaichiWCSPHSolver:
                                 if r < h:
                                     rho += mass * poly6_kernel(r, h)
             
-            # Add boundary contributions using boundary spatial hash
-            for offset_x in ti.static(range(-1, 2)):
-                for offset_y in ti.static(range(-1, 2)):
-                    for offset_z in ti.static(range(-1, 2)):
-                        cell = cell_i + ti.math.ivec3(offset_x, offset_y, offset_z)
-                        
-                        if self.boundary_hash.is_valid_cell(cell):
-                            n_boundary_neighbors = self.boundary_hash.get_cell_particle_count(cell)
+            # Add boundary contributions (automatically skipped if n_boundary == 0)
+            if n_boundary > 0:
+                for offset_x in ti.static(range(-1, 2)):
+                    for offset_y in ti.static(range(-1, 2)):
+                        for offset_z in ti.static(range(-1, 2)):
+                            cell = cell_i + ti.math.ivec3(offset_x, offset_y, offset_z)
                             
-                            for k in range(n_boundary_neighbors):
-                                j = self.boundary_hash.get_cell_particle(cell, k)
-                                r_vec = pos_i - self.boundary_particles.positions[j]
-                                r = r_vec.norm()
+                            if self.boundary_hash.is_valid_cell(cell):
+                                n_boundary_neighbors = self.boundary_hash.get_cell_particle_count(cell)
                                 
-                                if r < h:
-                                    rho += self.boundary_particles.pseudo_masses[j] * poly6_kernel(r, h)
+                                for k in range(n_boundary_neighbors):
+                                    j = self.boundary_hash.get_cell_particle(cell, k)
+                                    r_vec = pos_i - self.boundary_particles.positions[j]
+                                    r = r_vec.norm()
+                                    
+                                    if r < h:
+                                        rho += self.boundary_particles.pseudo_masses[j] * poly6_kernel(r, h)
             
-            # Clamp to avoid numerical issues
-            self.densities[i] = ti.max(rho, self.rho0 * 0.01)
-    
-    @ti.kernel
-    def compute_density(self):
-        """Compute density for all particles using SPH summation."""
-        n = self.n_particles[None]
-        h = self.h
-        mass = self.mass
-        
-        for i in range(n):
-            rho = 0.0
-            pos_i = self.positions[i]
-            
-            # Get cell index for particle i
-            cell_i = ti.cast((pos_i - self.domain_min[None]) / self.cell_size, ti.i32)
-            
-            # Search 27 neighboring cells (3x3x3)
-            for offset_x in ti.static(range(-1, 2)):
-                for offset_y in ti.static(range(-1, 2)):
-                    for offset_z in ti.static(range(-1, 2)):
-                        cell = cell_i + ti.math.ivec3(offset_x, offset_y, offset_z)
-                        
-                        if self.spatial_hash.is_valid_cell(cell):
-                            n_neighbors = self.spatial_hash.get_cell_particle_count(cell)
-                            
-                            for k in range(n_neighbors):
-                                j = self.spatial_hash.get_cell_particle(cell, k)
-                                r_vec = pos_i - self.positions[j]
-                                r = r_vec.norm()
-                                
-                                if r < h:
-                                    rho += mass * poly6_kernel(r, h)
+            # Add self-contribution (CRITICAL: same as WCSPH.py line 46)
+            # This ensures particle always has minimum density even if no neighbors
+            rho += mass * poly6_kernel(0.0, h)  
             
             # Clamp to avoid numerical issues
             self.densities[i] = ti.max(rho, self.rho0 * 0.01)
     
     @ti.kernel
     def compute_pressure(self):
-        """Compute pressure from density using Tait equation of state."""
+        """Compute pressure from density using Tait equation of state.
+        
+        Formula (same as WCSPH.py): p = (κ * ρ₀ / γ) * ((ρ/ρ₀)^γ - 1)
+        """
         n = self.n_particles[None]
         
         for i in range(n):
             rho = self.densities[i]
-            # Tait EOS: p = κ * ((ρ/ρ₀)^γ - 1)
+            # Tait EOS: p = (κ * ρ₀ / γ) * ((ρ/ρ₀)^γ - 1) ？？？？？ in wcsph
+            # This formula ensures p=0 when ρ=ρ₀
             ratio = rho / self.rho0
             self.pressures[i] = self.kappa * (ti.pow(ratio, self.gamma) - 1.0)
+            # ratio = rho / self.rho0
+            # factor = (self.kappa * self.rho0) / self.gamma
+            # self.pressures[i] = factor * (ti.pow(ratio, self.gamma) - 1.0)ratio = rho / self.rho0
+            # factor = (self.kappa * self.rho0) / self.gamma
+            # self.pressures[i] = factor * (ti.pow(ratio, self.gamma) - 1.0)
     
     @ti.kernel
     def compute_forces(self):
-        """Compute pressure and viscosity forces."""
-        n = self.n_particles[None]
-        h = self.h
-        mass = self.mass
+        """Compute pressure, viscosity, and boundary pressure forces.
         
-        for i in range(n):
-            force = ti.math.vec3(0.0, 0.0, 0.0)
-            pos_i = self.positions[i]
-            vel_i = self.velocities[i]
-            rho_i = self.densities[i]
-            p_i = self.pressures[i]
-            
-            if rho_i < 1e-6:
-                continue
-            
-            term_i = p_i / (rho_i * rho_i)
-            cell_i = ti.cast((pos_i - self.domain_min[None]) / self.cell_size, ti.i32)
-            
-            # Neighbor search
-            for offset_x in ti.static(range(-1, 2)):
-                for offset_y in ti.static(range(-1, 2)):
-                    for offset_z in ti.static(range(-1, 2)):
-                        cell = cell_i + ti.math.ivec3(offset_x, offset_y, offset_z)
-                        
-                        if self.spatial_hash.is_valid_cell(cell):
-                            n_neighbors = self.spatial_hash.get_cell_particle_count(cell)
-                            
-                            for k in range(n_neighbors):
-                                j = self.spatial_hash.get_cell_particle(cell, k)
-                                
-                                if i != j:
-                                    pos_j = self.positions[j]
-                                    rho_j = self.densities[j]
-                                    
-                                    if rho_j < 1e-6:
-                                        continue
-                                    
-                                    r_vec = pos_i - pos_j
-                                    r = r_vec.norm()
-                                    
-                                    if r < h and r > 1e-6:
-                                        # Pressure force (symmetric)
-                                        p_j = self.pressures[j]
-                                        term_j = p_j / (rho_j * rho_j)
-                                        grad_w = spiky_grad_kernel(r_vec, h)
-                                        f_pressure = -mass * mass * (term_i + term_j) * grad_w
-                                        force += f_pressure
-                                        
-                                        # XSPH viscosity (velocity smoothing)
-                                        vel_j = self.velocities[j]
-                                        v_ij = vel_j - vel_i
-                                        w = poly6_kernel(r, h)
-                                        f_visc = mass * mass * (v_ij / rho_j) * w * self.visc_alpha
-                                        force += f_visc
-            
-            self.forces[i] = force
-    
-    @ti.kernel
-    def compute_forces_with_boundaries(self):
-        """Compute pressure, viscosity, and boundary pressure forces using spatial hash."""
+        Includes both fluid-fluid and fluid-boundary interactions.
+        Boundary forces are automatically skipped if n_boundary == 0.
+        """
         n = self.n_particles[None]
+        n_boundary = self.boundary_particles.n_particles[None]
         h = self.h
         mass = self.mass
         
@@ -347,33 +278,34 @@ class TaichiWCSPHSolver:
                                         f_pressure = -mass * mass * (term_i + term_j) * grad_w
                                         force += f_pressure
                                         
-                                        # Viscosity
+                                        # XSPH viscosity (velocity smoothing)
                                         vel_j = self.velocities[j]
                                         v_ij = vel_j - vel_i
                                         w = poly6_kernel(r, h)
                                         f_visc = mass * mass * (v_ij / rho_j) * w * self.visc_alpha
                                         force += f_visc
             
-            # Boundary pressure forces using boundary spatial hash
-            for offset_x in ti.static(range(-1, 2)):
-                for offset_y in ti.static(range(-1, 2)):
-                    for offset_z in ti.static(range(-1, 2)):
-                        cell = cell_i + ti.math.ivec3(offset_x, offset_y, offset_z)
-                        
-                        if self.boundary_hash.is_valid_cell(cell):
-                            n_boundary_neighbors = self.boundary_hash.get_cell_particle_count(cell)
+            # Boundary pressure forces (automatically skipped if n_boundary == 0)
+            if n_boundary > 0:
+                for offset_x in ti.static(range(-1, 2)):
+                    for offset_y in ti.static(range(-1, 2)):
+                        for offset_z in ti.static(range(-1, 2)):
+                            cell = cell_i + ti.math.ivec3(offset_x, offset_y, offset_z)
                             
-                            for k in range(n_boundary_neighbors):
-                                j = self.boundary_hash.get_cell_particle(cell, k)
-                                r_vec = pos_i - self.boundary_particles.positions[j]
-                                r = r_vec.norm()
+                            if self.boundary_hash.is_valid_cell(cell):
+                                n_boundary_neighbors = self.boundary_hash.get_cell_particle_count(cell)
                                 
-                                if r < h and r > 1e-6:
-                                    grad_w = spiky_grad_kernel(r_vec, h)
-                                    b_mass = self.boundary_particles.pseudo_masses[j]
-                                    # Boundary pressure force: F = -m_i * Ψ_j * (p_i/ρ_i²) * ∇W
-                                    f_boundary = -mass * b_mass * term_i * grad_w
-                                    force += f_boundary
+                                for k in range(n_boundary_neighbors):
+                                    j = self.boundary_hash.get_cell_particle(cell, k)
+                                    r_vec = pos_i - self.boundary_particles.positions[j]
+                                    r = r_vec.norm()
+                                    
+                                    if r < h and r > 1e-6:
+                                        grad_w = spiky_grad_kernel(r_vec, h)
+                                        b_mass = self.boundary_particles.pseudo_masses[j]
+                                        # Boundary pressure force: F = -m_i * Ψ_j * (p_i/ρ_i²) * ∇W
+                                        f_boundary = -mass * b_mass * term_i * grad_w
+                                        force += f_boundary
             
             self.forces[i] = force
     
@@ -564,29 +496,31 @@ class TaichiWCSPHSolver:
                     print(f"           Consider increasing max_particles_per_cell or refining mesh sampling")
                 self._boundary_stats_printed = True
         
-        # 2. Compute densities
+        # 2. Compute densities (unified function handles both fluid and boundary)
         if not hasattr(self, '_first_density_done'):
-            print(f"[TaichiSPH] Computing densities (first time, compiling kernel with boundary interactions)...")
+            boundary_msg = "with" if has_boundaries else "without"
+            print(f"[TaichiSPH] Computing densities (first time, {boundary_msg} boundary interactions)...")
             print(f"  This may take a few minutes on first run...")
+            if has_boundaries:
+                n_boundary = self.boundary_particles.n_particles[None]
+                print(f"  [TaichiSPH] n_boundary = {n_boundary}")
             self._first_density_done = True
         
-        if has_boundaries:
-            self.compute_density_with_boundaries()
-        else:
-            self.compute_density()
+        self.compute_density()
         
         if not hasattr(self, '_density_compiled'):
             print(f"[TaichiSPH] Density kernel compiled successfully")
+            # Check if densities actually increased due to boundaries
+            if has_boundaries:
+                densities_np = self.get_densities()
+                print(f"  [TaichiSPH] Density after boundary: min={densities_np.min():.2f}, max={densities_np.max():.2f}, avg={densities_np.mean():.2f}")
             self._density_compiled = True
         
         # 3. Compute pressures
         self.compute_pressure()
         
-        # 4. Compute forces
-        if has_boundaries:
-            self.compute_forces_with_boundaries()
-        else:
-            self.compute_forces()
+        # 4. Compute forces (unified function handles both fluid and boundary)
+        self.compute_forces()
         
         # 5. Surface tension
         if self.surf_tension_kappa > 0:
@@ -598,7 +532,7 @@ class TaichiWCSPHSolver:
         
         # 7. Apply boundary friction to velocities (after integration)
         # This matches WCSPH.py's _apply_boundary_interactions() which modifies
-        # velocities after integrate_symplectic()
+        # velocities after integrate_symplectic()， here we don't apply friction to test
         if has_boundaries and self.boundary_friction_sigma > 0:
             self.apply_boundary_friction(dt)
         
