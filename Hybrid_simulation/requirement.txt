@@ -1,0 +1,16 @@
+# Python Version: 3.13.5
+colorama==0.4.6
+dill==0.4.0
+llvmlite==0.45.1
+markdown-it-py==4.0.0
+mdurl==0.1.2
+numba==0.62.1
+numpy==2.3.5
+pip==25.3
+pybullet==3.2.7
+Pygments==2.19.2
+pysplashsurf==0.14.0.0
+PyYAML==6.0.3
+rich==14.2.0
+taichi==1.7.4
+tqdm==4.67.1
