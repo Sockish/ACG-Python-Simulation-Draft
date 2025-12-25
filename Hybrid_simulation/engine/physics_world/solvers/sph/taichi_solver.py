@@ -114,7 +114,7 @@ class TaichiWCSPHSolver:
         # Separate spatial hash for boundary particles (ghost particles)
         # Boundary cells may be more crowded, so use higher capacity
         # Increased to 400 to handle dense mesh sampling (observed max ~314)
-        self.boundary_hash = SpatialHashGrid(grid_size, max_particles_per_cell=400)
+        self.boundary_hash = SpatialHashGrid(grid_size, max_particles_per_cell=1500)
         
         print(f"[TaichiSPH] Initialized with:")
         print(f"  - Max particles: {max_particles}")
@@ -124,7 +124,7 @@ class TaichiWCSPHSolver:
         print(f"  - Domain: {domain_size}")
         print(f"  - Surface tension: {surface_tension_kappa}")
         print(f"  - Boundary friction: {boundary_friction_sigma}")
-        print(f"  - Boundary hash max per cell: 400 (for dense ghost particles)")
+        print(f"  - Boundary hash max per cell: (for dense ghost particles)")
     
     def initialize_particles(self, positions_np: np.ndarray, velocities_np: np.ndarray):
         """Load initial particle data from numpy arrays.

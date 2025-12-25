@@ -69,11 +69,6 @@ class TaichiSolverAdapter:
         # Calculate domain size
         min_corner = liquid_box.min_corner
         max_corner = liquid_box.max_corner
-        domain_size = (
-            max_corner[0] - min_corner[0],
-            max_corner[1] - min_corner[1],
-            max_corner[2] - min_corner[2],
-        )
         
         # Create Taichi solver
         spacing = float(liquid_box.particle_spacing)
@@ -252,9 +247,12 @@ class TaichiSolverAdapter:
             densities_np = self.taichi_solver.get_densities()
             pressures_np = self.taichi_solver.pressures.to_numpy()[:len(densities_np)]
             positions_np = self.taichi_solver.get_positions()
+            velocities_np = self.taichi_solver.get_velocities()
             print(f"[TaichiAdapter Step {self._step_count}]")
             print(f"  - Density range: [{densities_np.min():.2f}, {densities_np.max():.2f}], avg={densities_np.mean():.2f}")
             print(f"  - Pressure range: [{pressures_np.min():.2f}, {pressures_np.max():.2f}], avg={pressures_np.mean():.2f}")
+            print(f"  - Velocity magnitude range: [{np.linalg.norm(velocities_np, axis=1).min():.2f}, "
+                  f"{np.linalg.norm(velocities_np, axis=1).max():.2f}], avg={np.linalg.norm(velocities_np, axis=1).mean():.2f}")
             print(f"  - Fluid position range: z=[{positions_np[:, 2].min():.3f}, {positions_np[:, 2].max():.3f}]")
             
             # Check for particles falling through floor

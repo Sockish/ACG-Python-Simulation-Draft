@@ -114,9 +114,31 @@ class StaticBodyState:
 
 
 @dataclass
+class MPMState:
+    """MPM particle state for export and rendering."""
+    positions: any  # numpy array (N,3) or List[Vec3] - meters (m)
+    velocities: any  # numpy array (N,3) or List[Vec3] - meters per second (m/s)
+    masses: any  # numpy array (N,) or List[float] - kilograms (kg)
+    volumes: any  # numpy array (N,) or List[float] - cubic meters (m^3)
+    particle_count: int
+    material_type: str  # 'water', 'sand', 'snow', 'jelly'
+    
+    def get_densities(self):
+        """Compute density from mass and volume for each particle."""
+        import numpy as np
+        if isinstance(self.masses, np.ndarray):
+            # Fast numpy computation
+            return np.where(self.volumes > 1e-10, self.masses / self.volumes, 1000.0)
+        else:
+            # Fallback for list
+            return [m / v if v > 1e-10 else 1000.0 for m, v in zip(self.masses, self.volumes)]
+
+
+@dataclass
 class WorldSnapshot:
     step_index: int
     time: float
     fluids: FluidState | None
+    mpm_particles: MPMState | None  # MPM particles
     rigids: List[RigidBodyState]
     statics: List[StaticBodyState]

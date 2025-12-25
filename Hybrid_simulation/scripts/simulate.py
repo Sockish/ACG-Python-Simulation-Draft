@@ -32,29 +32,44 @@ def parse_args() -> argparse.Namespace:
         action="store_true", 
         help="Use Taichi with CPU backend instead of GPU"
     )
+    parser.add_argument(
+        "--use-mpm",
+        action="store_true",
+        help="Use MPM (Material Point Method) solver instead of SPH"
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     
-    # Set Taichi backend if requested
-    if args.use_taichi:
+    # Set Taichi backend if requested (for both SPH and MPM)
+    if args.use_taichi or args.use_mpm:
         import taichi as ti
         import os
         os.environ['TI_LOG_LEVEL'] = 'error'  # Suppress Taichi logs
         if args.taichi_cpu:
             ti.init(arch=ti.cpu)
-            print("🚀 Using Taichi SPH solver (CPU backend)")
+            solver_name = "MPM" if args.use_mpm else "Taichi SPH"
+            print(f"🚀 Using {solver_name} solver (CPU backend)")
         else:
             try:
                 ti.init(arch=ti.gpu)
-                print("🚀 Using Taichi SPH solver (GPU backend)")
+                solver_name = "MPM" if args.use_mpm else "Taichi SPH"
+                print(f"🚀 Using {solver_name} solver (GPU backend)")
             except Exception as e:
                 print(f"⚠ GPU init failed: {e}, falling back to CPU")
                 ti.init(arch=ti.cpu)
     
-    container = WorldContainer.from_config_file(args.config, use_taichi=args.use_taichi)
+    # Create world container with appropriate solver
+    use_mpm = args.use_mpm
+    use_taichi_sph = args.use_taichi and not args.use_mpm
+    
+    container = WorldContainer.from_config_file(
+        args.config, 
+        use_taichi=use_taichi_sph,
+        use_mpm=use_mpm
+    )
     
     steps = args.steps if args.steps is not None else container.config.simulation.total_steps
     for _ in tqdm(range(steps), desc="Simulating"):

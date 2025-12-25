@@ -8,6 +8,11 @@ Outputs reconstructed surfaces to a clean show_frames directory for Blender rend
   │   └── (other bodies)
   ├── 00001/
   ...
+
+Supports both SPH and MPM particle-based simulations:
+- SPH (Weakly Compressible SPH): Particles represent fluid samples
+- MPM (Material Point Method): Particles represent material points
+Both export to PLY format and use the same Splashsurf reconstruction pipeline.
 """
 
 from __future__ import annotations
@@ -75,16 +80,32 @@ class SplashsurfReconstructor:
         # show_frames is the clean output directory with only selected frames
         self.show_frames_dir = self.output_dir or (self.output_root / "show_frames")
         
-        spacing = float(self.config.liquid_box.particle_spacing)
+        # Determine particle properties based on simulation type
+        # For MPM: use mpm_box config if available, otherwise liquid_box
+        if hasattr(self.config, 'mpm_box') and self.config.mpm_box is not None:
+            # MPM configuration
+            spacing = float(self.config.mpm_box.particle_spacing)
+            self.rest_density = float(self.config.mpm_box.density)
+        elif hasattr(self.config, 'liquid_box') and self.config.liquid_box is not None:
+            # SPH configuration
+            spacing = float(self.config.liquid_box.particle_spacing)
+            self.rest_density = float(self.config.liquid_box.rest_density)
+        else:
+            # Default fallback
+            spacing = 0.1
+            self.rest_density = 1000.0
+        
         if self.particle_radius is None:
             self.particle_radius = spacing * 0.5
-        if self.rest_density is None:
-            self.rest_density = float(self.config.liquid_box.rest_density)
         if self.smoothing_length_multiplier is None:
             if self.particle_radius <= 0:
                 self.smoothing_length_multiplier = 2.0
             else:
-                smoothing_len = float(self.config.liquid_box.smoothing_length)
+                # For SPH, use configured smoothing length; for MPM, estimate from spacing
+                if hasattr(self.config, 'liquid_box') and self.config.liquid_box is not None:
+                    smoothing_len = float(self.config.liquid_box.smoothing_length)
+                else:
+                    smoothing_len = spacing * 1.8  # MPM default estimate
                 self.smoothing_length_multiplier = max(smoothing_len / self.particle_radius, 0.5)
         self.cube_size_multiplier = max(self.cube_size_multiplier, 0.1)
         self.surface_threshold = max(self.surface_threshold, 1e-3)

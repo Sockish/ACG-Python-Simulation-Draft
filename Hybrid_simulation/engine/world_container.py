@@ -21,9 +21,9 @@ class WorldContainer:
     current_step: int = 0
 
     @classmethod
-    def from_config_file(cls, config_path: str | Path, use_taichi: bool = False) -> "WorldContainer":
+    def from_config_file(cls, config_path: str | Path, use_taichi: bool = False, use_mpm: bool = False) -> "WorldContainer":
         config = load_scene_config(config_path)
-        world = PhysicsWorld.from_config(config, use_taichi=use_taichi)
+        world = PhysicsWorld.from_config(config, use_taichi=use_taichi, use_mpm=use_mpm)
         exporter = SimulationExporter.from_config(config.export)
         return cls(config=config, world=world, exporter=exporter)
 

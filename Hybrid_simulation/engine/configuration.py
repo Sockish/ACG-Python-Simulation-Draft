@@ -35,6 +35,23 @@ class LiquidBoxConfig:
 
 
 @dataclass
+class MPMBoxConfig:
+    """Configuration for MPM (Material Point Method) particles."""
+    min_corner: Sequence[float]  # meters (m)
+    max_corner: Sequence[float]  # meters (m)
+    particle_spacing: float  # meters (m)
+    density: float  # kilograms per cubic meter (kg/m^3)
+    initial_velocity: Sequence[float]  # meters per second (m/s)
+    material_type: str = "water"  # Material type: water, jelly, snow
+    grid_resolution: int = 64  # Grid resolution (e.g., 64 means 64^3 grid)
+    domain_min: float = -5.0  # Minimum coordinate of simulation domain
+    domain_max: float = 5.0  # Maximum coordinate of simulation domain
+    bulk_modulus: float = 3000.0  # Bulk modulus for water (similar to kappa in SPH)
+    youngs_modulus: float = 0.0  # Young's modulus (0 for ideal fluid, >0 for elasticity)
+    boundary_mode: str = "sticky"  # Boundary mode: sticky, slip, separate
+
+
+@dataclass
 class RigidBodyConfig:
     name: str
     mesh_path: Path
@@ -82,7 +99,8 @@ class ExportConfig:
 class SceneConfig:
     scene_name: str
     simulation: SimulationConfig
-    liquid_box: LiquidBoxConfig
+    liquid_box: LiquidBoxConfig | None = None
+    mpm_box: MPMBoxConfig | None = None
     rigid_bodies: List[RigidBodyConfig] = field(default_factory=list)
     static_bodies: List[StaticBodyConfig] = field(default_factory=list)
     export: ExportConfig | None = None
@@ -103,11 +121,22 @@ def load_scene_config(config_path: str | Path) -> SceneConfig:
     base_dir = path.parent
 
     simulation = SimulationConfig(**raw["simulation"])
+    
+    # Load liquid box (SPH)
     if raw.get("liquid_box"):
         liquid_box = LiquidBoxConfig(**raw["liquid_box"])
     else:
-        print("Warning: No liquid box configuration found, will use no fluid simulation.")
         liquid_box = None
+    
+    # Load MPM box
+    if raw.get("mpm_box"):
+        mpm_box = MPMBoxConfig(**raw["mpm_box"])
+    else:
+        mpm_box = None
+    
+    # Check that at least one fluid method is configured
+    if liquid_box is None and mpm_box is None:
+        print("Warning: No liquid_box or mpm_box configuration found, will use no fluid simulation.")
 
     rigid_bodies = [
         RigidBodyConfig(
@@ -147,6 +176,7 @@ def load_scene_config(config_path: str | Path) -> SceneConfig:
         scene_name=raw.get("scene_name", path.stem),
         simulation=simulation,
         liquid_box=liquid_box,
+        mpm_box=mpm_box,
         rigid_bodies=rigid_bodies,
         static_bodies=static_bodies,
         export=export,
