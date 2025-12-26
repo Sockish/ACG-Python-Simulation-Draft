@@ -18,7 +18,7 @@ import numpy as np
 from typing import Tuple, Optional
 from random import Random
 
-from .taichi_kernels import poly6_kernel, spiky_grad_kernel, poly6_gradient, poly6_laplacian
+from .taichi_kernels import poly6_kernel, spiky_grad_kernel
 from .taichi_spatial_hash import SpatialHashGrid
 from .taichi_boundary import BoundaryParticles
 
@@ -35,7 +35,7 @@ class TaichiWCSPHSolver:
         particle_mass: float,
         rest_density: float,
         stiffness: float = 3000.0,
-        gamma: float = 7.0,
+        gamma: float = 5.0,
         viscosity_alpha: float = 0.25,
         surface_tension_kappa: float = 0.15,
         boundary_friction_sigma: float = 4.0,
@@ -92,6 +92,7 @@ class TaichiWCSPHSolver:
         
         # Additional force fields
         self.surface_forces = ti.Vector.field(3, dtype=ti.f32, shape=max_particles)
+        self.xsph_velocities = ti.Vector.field(3, dtype=ti.f32, shape=max_particles)
         
         # Simulation parameters (stored as fields for kernel access)
         self.n_particles = ti.field(dtype=ti.i32, shape=())
@@ -157,6 +158,7 @@ class TaichiWCSPHSolver:
         for i in range(n):
             rho = 0.0
             pos_i = self.positions[i]
+            eps_val = ti.cast(self.eps, ti.f32)
             
             # Get cell index for particle i
             cell_i = ti.cast((pos_i - self.domain_min[None]) / self.cell_size, ti.i32)
@@ -172,6 +174,10 @@ class TaichiWCSPHSolver:
                             
                             for k in range(n_neighbors):
                                 j = self.spatial_hash.get_cell_particle(cell, k)
+                                
+                                if i == j:
+                                    continue
+                                
                                 r_vec = pos_i - self.positions[j]
                                 r = r_vec.norm()
                                 
@@ -196,12 +202,10 @@ class TaichiWCSPHSolver:
                                     if r < h:
                                         rho += self.boundary_particles.pseudo_masses[j] * poly6_kernel(r, h)
             
-            # Add self-contribution (CRITICAL: same as WCSPH.py line 46)
-            # This ensures particle always has minimum density even if no neighbors
-            rho += mass * poly6_kernel(0.0, h)  
+            rho += mass * poly6_kernel(0.0, h)
             
             # Clamp to avoid numerical issues
-            self.densities[i] = ti.max(rho, self.rho0 * 0.01)
+            self.densities[i] = ti.max(rho, eps_val)
     
     @ti.kernel
     def compute_pressure(self):
@@ -216,12 +220,8 @@ class TaichiWCSPHSolver:
             # Tait EOS: p = (κ * ρ₀ / γ) * ((ρ/ρ₀)^γ - 1) ？？？？？ in wcsph
             # This formula ensures p=0 when ρ=ρ₀
             ratio = rho / self.rho0
-            self.pressures[i] = self.kappa * (ti.pow(ratio, self.gamma) - 1.0)
-            # ratio = rho / self.rho0
-            # factor = (self.kappa * self.rho0) / self.gamma
-            # self.pressures[i] = factor * (ti.pow(ratio, self.gamma) - 1.0)ratio = rho / self.rho0
-            # factor = (self.kappa * self.rho0) / self.gamma
-            # self.pressures[i] = factor * (ti.pow(ratio, self.gamma) - 1.0)
+            factor = (self.kappa * self.rho0) / self.gamma
+            self.pressures[i] = factor * (ti.pow(ratio, self.gamma) - 1.0)
     
     @ti.kernel
     def compute_forces(self):
@@ -278,12 +278,7 @@ class TaichiWCSPHSolver:
                                         f_pressure = -mass * mass * (term_i + term_j) * grad_w
                                         force += f_pressure
                                         
-                                        # XSPH viscosity (velocity smoothing)
-                                        vel_j = self.velocities[j]
-                                        v_ij = vel_j - vel_i
-                                        w = poly6_kernel(r, h)
-                                        f_visc = mass * mass * (v_ij / rho_j) * w * self.visc_alpha
-                                        force += f_visc
+                                        # Pure pressure contribution; XSPH handled separately
             
             # Boundary pressure forces (automatically skipped if n_boundary == 0)
             if n_boundary > 0:
@@ -311,7 +306,7 @@ class TaichiWCSPHSolver:
     
     @ti.kernel
     def compute_surface_tension(self):
-        """Compute surface tension forces using color field method."""
+        """Compute surface tension forces (matches legacy WCSPH implementation)."""
         n = self.n_particles[None]
         h = self.h
         mass = self.mass
@@ -321,10 +316,6 @@ class TaichiWCSPHSolver:
             force = ti.math.vec3(0.0, 0.0, 0.0)
             pos_i = self.positions[i]
             cell_i = ti.cast((pos_i - self.domain_min[None]) / self.cell_size, ti.i32)
-            
-            # Compute color field gradient and laplacian
-            grad_c = ti.math.vec3(0.0, 0.0, 0.0)
-            lapl_c = 0.0
             
             for offset_x in ti.static(range(-1, 2)):
                 for offset_y in ti.static(range(-1, 2)):
@@ -337,23 +328,75 @@ class TaichiWCSPHSolver:
                             for k in range(n_neighbors):
                                 j = self.spatial_hash.get_cell_particle(cell, k)
                                 
-                                if i != j:
-                                    r_vec = pos_i - self.positions[j]
-                                    r = r_vec.norm()
-                                    
-                                    if r < h and r > 1e-6:
-                                        rho_j = self.densities[j]
-                                        if rho_j > 1e-6:
-                                            grad_c += (mass / rho_j) * poly6_gradient(r_vec, h)
-                                            lapl_c += (mass / rho_j) * poly6_laplacian(r, h)
-            
-            # Surface normal and curvature
-            grad_c_norm = grad_c.norm()
-            if grad_c_norm > 1e-6:
-                normal = grad_c / grad_c_norm
-                force = -kappa * lapl_c * normal
+                                if i == j:
+                                    continue
+                                
+                                r_vec = pos_i - self.positions[j]
+                                r_sq = r_vec.dot(r_vec)
+                                
+                                if r_sq > 1e-12:
+                                    r = ti.sqrt(r_sq)
+                                    if r < h:
+                                        grad = spiky_grad_kernel(r_vec, h)
+                                        force += (-kappa * mass * r_sq) * grad
             
             self.surface_forces[i] = force
+    
+    @ti.kernel
+    def _compute_xsph_velocities(self):
+        """Compute XSPH-smoothed velocities (handled separately from pressure forces)."""
+        n = self.n_particles[None]
+        h = self.h
+        mass = self.mass
+        alpha = self.visc_alpha
+        eps_val = ti.cast(self.eps, ti.f32)
+        
+        for i in range(n):
+            vel_i = self.velocities[i]
+            pos_i = self.positions[i]
+            correction = ti.math.vec3(0.0, 0.0, 0.0)
+            cell_i = ti.cast((pos_i - self.domain_min[None]) / self.cell_size, ti.i32)
+            
+            for offset_x in ti.static(range(-1, 2)):
+                for offset_y in ti.static(range(-1, 2)):
+                    for offset_z in ti.static(range(-1, 2)):
+                        cell = cell_i + ti.math.ivec3(offset_x, offset_y, offset_z)
+                        
+                        if self.spatial_hash.is_valid_cell(cell):
+                            n_neighbors = self.spatial_hash.get_cell_particle_count(cell)
+                            
+                            for k in range(n_neighbors):
+                                j = self.spatial_hash.get_cell_particle(cell, k)
+                                
+                                if i == j:
+                                    continue
+                                
+                                rho_j = self.densities[j]
+                                if rho_j <= eps_val:
+                                    continue
+                                
+                                r_vec = pos_i - self.positions[j]
+                                r = r_vec.norm()
+                                
+                                if r < h:
+                                    w = poly6_kernel(r, h)
+                                    v_diff = self.velocities[j] - vel_i
+                                    correction += (mass / rho_j) * w * v_diff
+            
+            self.xsph_velocities[i] = vel_i + alpha * correction
+    
+    @ti.kernel
+    def _commit_xsph_velocities(self):
+        """Copy smoothed velocities back to main velocity field."""
+        n = self.n_particles[None]
+        for i in range(n):
+            self.velocities[i] = self.xsph_velocities[i]
+    
+    def apply_xsph_viscosity(self):
+        if self.visc_alpha <= 0:
+            return
+        self._compute_xsph_velocities()
+        self._commit_xsph_velocities()
     
     @ti.kernel
     def apply_boundary_friction(self, dt: ti.f32):
@@ -443,7 +486,7 @@ class TaichiWCSPHSolver:
             self.velocities[i] += acc * dt
             
             # Update position: x(t+dt) = x(t) + v(t+dt)*dt
-            self.positions[i] += self.velocities[i] * dt
+            self.positions[i] += self.velocities[i] * (dt * force_damp)
             
             # NOTE: No box boundary collision here!
             # Boundaries are handled purely through ghost particles (boundary_particles).
@@ -525,14 +568,19 @@ class TaichiWCSPHSolver:
         # 5. Surface tension
         if self.surf_tension_kappa > 0:
             self.compute_surface_tension()
+        else:
+            # Ensure forces are cleared if disabled
+            self.surface_forces.fill(0)
+        
+        # 5.5 XSPH viscosity smoothing (matches legacy order)
+        if self.visc_alpha > 0:
+            self.apply_xsph_viscosity()
         
         # 6. Time integration (positions and velocities updated)
         # Note: This is done BEFORE boundary friction, matching WCSPH.py's flow
         self.integrate(dt, force_damp)
         
         # 7. Apply boundary friction to velocities (after integration)
-        # This matches WCSPH.py's _apply_boundary_interactions() which modifies
-        # velocities after integrate_symplectic()， here we don't apply friction to test
         if has_boundaries and self.boundary_friction_sigma > 0:
             self.apply_boundary_friction(dt)
         

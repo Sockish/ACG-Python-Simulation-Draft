@@ -4,7 +4,7 @@ Handles rigid and static body boundary samples in GPU-compatible format.
 """
 import taichi as ti
 import numpy as np
-from typing import List, Tuple, Literal
+from typing import List, Optional, Tuple, Literal
 
 from .taichi_ghost_sampler import TaichiGhostSampler
 
@@ -67,7 +67,6 @@ class BoundaryParticles:
         mass_np = np.array(pseudo_masses, dtype=np.float32)
         types_np = np.zeros(n_new, dtype=np.int32)  # 0 = static
         
-        # Copy to GPU - get full array, modify slice, write back
         end_idx = start_idx + n_new
         positions_full = self.positions.to_numpy()
         positions_full[start_idx:end_idx] = pos_np
@@ -85,6 +84,10 @@ class BoundaryParticles:
         types_full[start_idx:end_idx] = types_np
         self.types.from_numpy(types_full)
         
+        velocities_full = self.velocities.to_numpy()
+        velocities_full[start_idx:end_idx] = 0.0
+        self.velocities.from_numpy(velocities_full)
+        
         self.n_particles[None] = start_idx + n_new
         return start_idx
     
@@ -93,7 +96,8 @@ class BoundaryParticles:
         body_index: int,
         positions: List[Vec3],
         normals: List[Vec3],
-        pseudo_masses: List[float]
+        pseudo_masses: List[float],
+        velocities: Optional[List[Vec3]] = None
     ) -> int:
         """Load rigid body boundary particles.
         
@@ -122,8 +126,13 @@ class BoundaryParticles:
         mass_np = np.array(pseudo_masses, dtype=np.float32)
         types_np = np.ones(n_new, dtype=np.int32)  # 1 = rigid
         body_np = np.full(n_new, body_index, dtype=np.int32)
+        if velocities is not None:
+            vel_np = np.array(velocities, dtype=np.float32)
+            if vel_np.ndim == 1:
+                vel_np = vel_np.reshape(-1, 3)
+        else:
+            vel_np = np.zeros((n_new, 3), dtype=np.float32)
         
-        # Copy to GPU - get full array, modify slice, write back
         end_idx = start_idx + n_new
         positions_full = self.positions.to_numpy()
         positions_full[start_idx:end_idx] = pos_np
@@ -144,6 +153,10 @@ class BoundaryParticles:
         body_full = self.body_indices.to_numpy()
         body_full[start_idx:end_idx] = body_np
         self.body_indices.from_numpy(body_full)
+        
+        velocities_full = self.velocities.to_numpy()
+        velocities_full[start_idx:end_idx] = vel_np
+        self.velocities.from_numpy(velocities_full)
         
         self.n_particles[None] = start_idx + n_new
         return start_idx
@@ -194,6 +207,24 @@ class BoundaryParticles:
     def clear(self):
         """Clear all boundary particles."""
         self.n_particles[None] = 0
+    
+    def update_rigid_range(
+        self,
+        start_idx: int,
+        positions: List[Vec3],
+        normals: List[Vec3],
+        velocities: List[Vec3],
+    ) -> None:
+        """Update an existing rigid boundary particle range in-place."""
+        count = len(positions)
+        for local_idx in range(count):
+            idx = start_idx + local_idx
+            px, py, pz = positions[local_idx]
+            nx, ny, nz = normals[local_idx]
+            vx, vy, vz = velocities[local_idx]
+            self.positions[idx] = ti.Vector([float(px), float(py), float(pz)])
+            self.normals[idx] = ti.Vector([float(nx), float(ny), float(nz)])
+            self.velocities[idx] = ti.Vector([float(vx), float(vy), float(vz)])
     
     def sample_and_load_mesh(
         self,
