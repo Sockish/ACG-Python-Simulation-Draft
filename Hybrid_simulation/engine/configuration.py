@@ -48,6 +48,7 @@ class MPMBoxConfig:
     domain_max: float = 5.0  # Maximum coordinate of simulation domain
     bulk_modulus: float = 3000.0  # Bulk modulus for water (similar to kappa in SPH)
     youngs_modulus: float = 0.0  # Young's modulus (0 for ideal fluid, >0 for elasticity)
+    poisson_ratio: float = 0.2  # Poisson's ratio (0.0-0.5, affects compressibility)
     boundary_mode: str = "sticky"  # Boundary mode: sticky, slip, separate
 
 

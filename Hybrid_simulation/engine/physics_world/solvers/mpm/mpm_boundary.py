@@ -270,14 +270,68 @@ class MPMBoundary:
     
     @ti.kernel
     def apply_static_collision(self, grid_v: ti.template(), grid_m: ti.template()):
+        """
+        Apply collision with static meshes on grid velocities.
+        
+        CRITICAL: Grid nodes and voxel centers are offset!
+        - occupancy[i,j,k] represents cell center at world position (i+0.5, j+0.5, k+0.5)*dx
+        - grid_v[i,j,k] represents grid node at world position (i, j, k)*dx
+        
+        Solution: Check if grid node is NEAR any solid cell (including neighbors)
+        """
+        mode = self.mode_value[None]
+        restitution = self.restitution[None]
+        
         for I in ti.grouped(grid_v):
-            if self.has_static_meshes_field[None] > 0 and grid_m[I] > 0:
-                if self.occupancy[I] == 1: # 只处理真正进入实体的节点
-                    n = self.normal[I]
-                    if n.norm() > 1e-6:
-                        v_normal = grid_v[I].dot(n)
-                        if v_normal < 0:
-                            # 尝试改用 SLIP (滑动) 而不是 BOUNCE，水流会美得多
-                             grid_v[I] -= v_normal * n 
-                            # 如果一定要用 bounce:
-                            #grid_v[I] -= (1.0 + self.restitution[None]) * v_normal * n
+            if grid_m[I] > 1e-12:  # Only process nodes with mass
+                # Check if this grid node is near a solid surface
+                # Strategy: check the 8 cells that this grid node belongs to
+                has_solid_neighbor = 0
+                normal_sum = ti.Vector([0.0, 0.0, 0.0])
+                
+                # Check the 8 surrounding cells (grid node is at corner of cells)
+                for di in ti.static([-1, 0]):
+                    for dj in ti.static([-1, 0]):
+                        for dk in ti.static([-1, 0]):
+                            ni = I[0] + di
+                            nj = I[1] + dj
+                            nk = I[2] + dk
+                            
+                            # Check bounds
+                            if 0 <= ni < self.n_grid and 0 <= nj < self.n_grid and 0 <= nk < self.n_grid:
+                                if self.occupancy[ni, nj, nk] == 1:
+                                    has_solid_neighbor = 1
+                                    # Accumulate normal (will normalize later)
+                                    normal_sum += self.normal[ni, nj, nk]
+                
+                # Apply collision if near solid
+                if has_solid_neighbor == 1:
+                    n = normal_sum
+                    n_norm = n.norm()
+                    
+                    if n_norm > 1e-6:
+                        n = n / n_norm  # Normalize
+                        v = grid_v[I]
+                        v_n = v.dot(n)  # Normal component
+                        
+                        # Only handle particles moving INTO solid (v_n < 0)
+                        if v_n < 0:
+                            if mode == 0:  # STICKY
+                                grid_v[I] = ti.Vector.zero(ti.f32, 3)
+                                
+                            elif mode == 1:  # SLIP
+                                # Remove normal component, keep tangential
+                                v_t = v - v_n * n
+                                grid_v[I] = v_t
+                                
+                            elif mode == 2:  # SEPARATE
+                                # Only prevent penetration
+                                v_t = v - v_n * n
+                                grid_v[I] = v_t
+                                
+                            else:  # mode == 3: BOUNCE
+                                # Reflect with restitution
+                                v_t = v - v_n * n  # Tangential component
+                                v_n_reflected = -restitution * v_n  # Reflected normal
+                                grid_v[I] = v_t + v_n_reflected * n
+

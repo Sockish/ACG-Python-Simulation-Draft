@@ -62,8 +62,8 @@ for file in os.listdir(frame_dir):
         # This replaces the manual load_obj_raw + import_obj_no_transform approach
         bpy.ops.wm.obj_import(
             filepath=obj_path,
-            forward_axis='X',
-            up_axis='Z'
+            forward_axis='Z',
+            up_axis='Y'
         )
         
         # The importer creates objects with a suffix; find the newly imported object
