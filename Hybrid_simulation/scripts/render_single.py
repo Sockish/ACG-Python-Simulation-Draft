@@ -10,7 +10,7 @@ from tqdm import tqdm
 ##   - 每帧文件夹: config/outputs/show_frames/00000/render.png
 ##   - 汇总文件夹: config/outputs/renders/00000.png (便于导出视频)
 
-BLENDER_PATH = r'C:\Program Files\Blender Foundation\Blender 4.5\blender.exe'
+BLENDER_PATH = r'/root/SPH/blender-4.5.0-linux-x64/blender'
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 RENDERING_SCRIPT = os.path.join(SCRIPT_DIR, "rendering_script.py")
 
