@@ -118,6 +118,8 @@ class PhysicsWorld:
                 gravity=gravity,
                 bulk_modulus=config.mpm_box.bulk_modulus,
                 youngs_modulus=config.mpm_box.youngs_modulus,
+                poisson_ratio=config.mpm_box.poisson_ratio,
+                material_type=config.mpm_box.material_type,
                 boundary_mode=config.mpm_box.boundary_mode,
             )
             

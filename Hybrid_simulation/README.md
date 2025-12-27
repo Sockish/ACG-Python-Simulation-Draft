@@ -10,7 +10,21 @@ python scripts/reconstruct.py --config config/scene_config.yaml --target-fps 60
 .
 Better Don't use !!!!!!!!python scripts/render.py --scene_file dambreak.blend --input_dir config/output_dambreak/show_frames
 
-python scripts/render_single.py --scene_file liquid.blend --input_dir config/outputs_pure_liquid2/show_frames
+python scripts/render_single.py --scene_file dambreak.blend --input_dir config/outputs_simulate_mpm/show_frames
 
 ## Combine rendered frames into a video using ffmpeg
-ffmpeg -framerate 60 -i config/outputs_pure_liquid2/renders/%05d.png -c:v libx264 -pix_fmt yuv420p outputs_pure_liquid2.mp4
+ffmpeg -framerate 60 -i config/outputs_simulate_mpm/renders/%05d.png -c:v libx264 -pix_fmt yuv420p outputs_simulate_mpm.mp4
+
+
+## MPM Simulation Instructions
+python ./mpm_instances/simulate_mpm4.py
+
+Then just render the output frames using the render_single.py script above.
+
+python scripts/render_single.py --scene_file Landscape.blend --input_dir config/outputs_simulate_mpm5/show_frames
+
+python scripts/render_single.py --scene_file floor.blend --input_dir config/outputs_simulate_mpm4/show_frames
+
+python scripts/render_single.py --scene_file Landscape.blend --input_dir config/outputs_simulate_mpm3/show_frames
+
+python scripts/render_single.py --scene_file dambreak.blend --input_dir config/outputs_simulate_mpm3/show_frames

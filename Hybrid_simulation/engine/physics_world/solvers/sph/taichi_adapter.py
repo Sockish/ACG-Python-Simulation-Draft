@@ -74,10 +74,13 @@ class TaichiSolverAdapter:
         spacing = float(liquid_box.particle_spacing)
         smoothing_length = float(liquid_box.smoothing_length)
         particle_mass = liquid_box.rest_density * spacing ** 3
+        domain_min = (-1.5, -1.5, -1.5)
+        domain_max = (1.5, 1.5, 2.5)
+        domain_size = (domain_max[0] - domain_min[0], domain_max[1] - domain_min[1], domain_max[2] - domain_min[2])
         
         self.taichi_solver = TaichiWCSPHSolver(
             max_particles=max_particles,
-            domain_size=(10.0, 10.0, 10.0),  # Fixed domain for spatial hash: [-5, 5] in each dimension
+            domain_size=domain_size,
             smoothing_length=smoothing_length,
             particle_mass=particle_mass,
             rest_density=liquid_box.rest_density,
@@ -91,10 +94,10 @@ class TaichiSolverAdapter:
         )
         
         # Set domain bounds for spatial hashing (covers entire scene including boundaries)
-        self.taichi_solver.domain_min[None] = ti.math.vec3(-5.0, -5.0, -5.0)
-        self.taichi_solver.domain_max[None] = ti.math.vec3(5.0, 5.0, 5.0)
+        self.taichi_solver.domain_min[None] = ti.math.vec3(*domain_min)
+        self.taichi_solver.domain_max[None] = ti.math.vec3(*domain_max)
         
-        print(f"[TaichiAdapter] Spatial hash domain: [-5, -5, -5] to [5, 5, 5]")
+        print(f"[TaichiAdapter] Spatial hash domain: {list(domain_min)} to {list(domain_max)}")
         print(f"[TaichiAdapter] Liquid box: {list(min_corner)} to {list(max_corner)}")
         
         self._initialized = False
