@@ -3,17 +3,17 @@
 scene_name: mpm_water_drop
 simulation:
   time_step: 0.0002 # s (smaller for softer materials)
-  total_steps: 5000
+  total_steps: 2500
   gravity: [0.0, 0.0, -9.81] # m/s^2
 
 # MPM water box configuration
 liquid_box:
   min_corner: [-0.5, -0.5, -0.8]  # m
   max_corner: [0.5, 0.5, 0.1]  # m
-  particle_spacing: 0.05  # m
+  particle_spacing: 0.02  # m
   rest_density: 1000.0  # kg/m^3
-  smoothing_length: 0.09  # m
-  initial_velocity: [0.0, 0.0, -2.0]  # m/s
+  smoothing_length: 0.036  # m
+  initial_velocity: [0.0, 0.0, -5.0]  # m/s
 # mpm_box:
 #   min_corner: [-0.8, -0.8, 0.4] # m (water cube starting at z=2.0)
 #   max_corner: [0.2, 0.0, 1.4] # m (2x2x2 cube)
