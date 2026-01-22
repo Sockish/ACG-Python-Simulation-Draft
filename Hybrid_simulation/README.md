@@ -10,7 +10,7 @@ python scripts/reconstruct.py --config config/scene_config.yaml --target-fps 60
 .
 Better Don't use !!!!!!!!python scripts/render.py --scene_file dambreak.blend --input_dir config/output_dambreak/show_frames
 
-python scripts/render_single.py --scene_file dambreak.blend --input_dir config/outputs_simulate_mpm/show_frames
+python scripts/render_single.py --scene_file dambreak.blend --input_dir config/outputs_simulate_mpm5/show_frames
 
 ## Combine rendered frames into a video using ffmpeg
 ffmpeg -framerate 60 -i config/outputs_simulate_mpm/renders/%05d.png -c:v libx264 -pix_fmt yuv420p outputs_simulate_mpm.mp4

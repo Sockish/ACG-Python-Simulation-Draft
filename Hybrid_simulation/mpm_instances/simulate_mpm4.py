@@ -43,7 +43,7 @@ def main_with_export():
     output_base = os.path.join(workspace_dir, "config", "outputs_simulate_mpm4")
     
     # Initialize solver
-    MPM = MPMSolver(max_particles=150000, domain_max=5, domain_min=-5.0, grid_resolution=64, gravity=(0, 0, -2.0))
+    MPM = MPMSolver(max_particles=150000, domain_max=5, domain_min=-5.0, grid_resolution=128, gravity=(0, 0, -2.0))
     
     # Step 1: Pre-load OBJ particles (only do this once, can be reused)
     landscape_template = MPM.load_obj_particles(
@@ -52,7 +52,7 @@ def main_with_export():
     )
     nailong_template = MPM.load_obj_particles(
         os.path.join(workspace_dir, "config", "assets", "nailong", "1.obj"),
-        particle_density=0.05 
+        particle_density=0.05
     )
     
     # Step 2: Initialize static particles from template
@@ -86,7 +86,7 @@ def main_with_export():
     
     # Simulation parameters
     substeps_per_frame = 20
-    max_frames = 399  # Increased to see more nailongs
+    max_frames = 1400  # Increased to see more nailongs
     nailong_spawn_interval = 100  # Spawn every 100 frames
     nailong_spawn_position = (0.0, 4.0, 0.0)  # Spawn position
     nailong_scale = 1.75

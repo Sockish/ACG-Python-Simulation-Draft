@@ -43,19 +43,19 @@ def main_with_export():
     output_base = os.path.join(workspace_dir, "config", "outputs_simulate_mpm2")
     
     # Initialize solver
-    MPM = MPMSolver(max_particles=150000, domain_max=0.95, domain_min=-0.95, grid_resolution=64)
+    MPM = MPMSolver(max_particles=300000, domain_max=0.95, domain_min=-0.95, grid_resolution=128)
     
     # Initialize particles
     MPM.init_rectangles(
         -0.7, -0.6, -0.7, 0.7, -0.0, 0.7,  # Box 1
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0,       # Box 2
-        add_particles=60000,
+        add_particles=100000,
         material_type=WATER
     )
     MPM.load_obj_and_init_particles(
         os.path.join(workspace_dir, "config", "assets", "static", "box_20cm_thick.obj"),
         material_type=JELLY,
-        particle_density=0.038,
+        particle_density=0.025,
         translation=(0.0, 0.0, 0.0),
         scale=0.92
     )
@@ -65,12 +65,12 @@ def main_with_export():
     material_configs = [
         {
             'name': 'fluid',           # Material name (used for folder and file naming)
-            'particle_range': (0, 60000),  # Particle index range
+            'particle_range': (0, 100000),  # Particle index range
             'material_type': WATER     # Material type ID
         },
         {
             'name': 'jelly1',
-            'particle_range': (60000, 100000),
+            'particle_range': (100000, 300000),
             'material_type': JELLY
         }
     ]
@@ -91,7 +91,7 @@ def main_with_export():
     
     # Simulation parameters
     substeps_per_frame = 20
-    max_frames = 400
+    max_frames = 960
     
     gui = ti.GUI("MPM3D", background_color=0x112F41)
     

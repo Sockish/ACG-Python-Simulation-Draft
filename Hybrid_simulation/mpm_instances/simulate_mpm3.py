@@ -43,13 +43,13 @@ def main_with_export():
     output_base = os.path.join(workspace_dir, "config", "outputs_simulate_mpm3")
     
     # Initialize solver
-    MPM = MPMSolver(max_particles=150000, domain_max=4, domain_min=-4.0, grid_resolution=64, gravity=(0, 0, -1.5))
+    MPM = MPMSolver(max_particles=150000, domain_max=4, domain_min=-4.0, grid_resolution=128, gravity=(0, 0, -1.5))
     
     # Initialize particles
     MPM.init_rectangles(
         -1.0, 2.0, -1.0, 0.5, 3.0, 0.5,  # Box 1
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0,       # Box 2
-        add_particles=60000,
+        add_particles=100000,
         material_type=WATER
     )
     MPM.load_obj_and_init_particles(
@@ -65,7 +65,7 @@ def main_with_export():
     material_configs = [
         {
             'name': 'fluid',           # Material name (used for folder and file naming)
-            'particle_range': (0, 60000),  # Particle index range
+            'particle_range': (0, 100000),  # Particle index range
             'material_type': WATER     # Material type ID
         } # Don't export static particles
     ]
@@ -86,7 +86,7 @@ def main_with_export():
     
     # Simulation parameters
     substeps_per_frame = 20
-    max_frames = 400
+    max_frames = 960
     
     gui = ti.GUI("MPM3D", background_color=0x112F41)
     

@@ -3,7 +3,8 @@ import numpy as np
 import taichi as ti
 import trimesh
 import os
-print(os.getcwd())
+import sys
+
 # 获取当前脚本的绝对路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
 # 获取项目根目录
@@ -15,7 +16,6 @@ sys.path.append(scripts_dir)
 from ply_exporter import PLYExporter
 from mpm_simple import WATER, MPMSolver
 ti.init(arch=ti.gpu)
-
 WATER = 0
 JELLY = 1
 SNOW = 2
@@ -39,23 +39,23 @@ def main_with_export():
     
     # Setup
     workspace_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    output_base = os.path.join(workspace_dir, "config", "outputs_simulate_mpm")
+    output_base = os.path.join(workspace_dir, "config", "outputs_simulate_mpm0")
     
     # Initialize solver
-    MPM = MPMSolver(max_particles=150000, domain_max=0.95, domain_min=-0.95, grid_resolution=64)
+    MPM = MPMSolver(max_particles=300000, domain_max=0.95, domain_min=-0.95, grid_resolution=128)
     
     # Initialize particles
     MPM.init_rectangles(
         -0.92, -0.92, -0.92, 0.9, -0.5, 0.9,  # Box 1
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0,       # Box 2
-        add_particles=60000,
+        add_particles=80000,
         material_type=WATER
     )
     MPM.init_rectangles(
         -0.0, -0.2, -0.0, 0.4, 0.3, 0.2,  # Box 1
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0,       # Box 2
         add_particles=30000,
-        material_type=JELLY
+        material_type=SNOW
     )
     MPM.init_rectangles(
         -0.0, 0.3, -0.0, -0.2, 0.5, -0.2,  # Box 1
@@ -75,22 +75,22 @@ def main_with_export():
     material_configs = [
         {
             'name': 'fluid',           # Material name (used for folder and file naming)
-            'particle_range': (0, 60000),  # Particle index range
+            'particle_range': (0, 80000),  # Particle index range
             'material_type': WATER     # Material type ID
         },
         {
             'name': 'jelly1',
-            'particle_range': (60000, 90000),
+            'particle_range': (80000, 110000),
             'material_type': JELLY
         },
         {
             'name': 'jelly2',
-            'particle_range': (90000, 120000),
+            'particle_range': (110000, 140000),
             'material_type': JELLY
         },
         {
             'name': 'jelly3',
-            'particle_range': (120000, 150000),
+            'particle_range': (140000, 170000),
             'material_type': JELLY
         }
     ]
@@ -111,7 +111,7 @@ def main_with_export():
     
     # Simulation parameters
     substeps_per_frame = 20
-    max_frames = 400
+    max_frames = 960
     
     gui = ti.GUI("MPM3D", background_color=0x112F41)
     

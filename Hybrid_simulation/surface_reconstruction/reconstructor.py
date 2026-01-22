@@ -103,9 +103,9 @@ class SplashsurfReconstructor:
             else:
                 # For SPH, use configured smoothing length; for MPM, estimate from spacing
                 if hasattr(self.config, 'liquid_box') and self.config.liquid_box is not None:
-                    smoothing_len = float(self.config.liquid_box.smoothing_length)
+                    smoothing_len = float(self.config.liquid_box.smoothing_length) *1.8
                 else:
-                    smoothing_len = spacing * 1.8  # MPM default estimate
+                    smoothing_len = spacing  # MPM default estimate
                 self.smoothing_length_multiplier = max(smoothing_len / self.particle_radius, 0.5)
         self.cube_size_multiplier = max(self.cube_size_multiplier, 0.1)
         self.surface_threshold = max(self.surface_threshold, 1e-3)

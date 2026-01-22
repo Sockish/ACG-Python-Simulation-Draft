@@ -43,7 +43,7 @@ def main_with_export():
     output_base = os.path.join(workspace_dir, "config", "outputs_simulate_mpm_nailong")
     
     # Initialize solver
-    MPM = MPMSolver(max_particles=150000, domain_max=0.95, domain_min=-0.95, grid_resolution=64)
+    MPM = MPMSolver(max_particles=300000, domain_max=0.95, domain_min=-0.95, grid_resolution=128)
     
     # Initialize particles
     MPM.init_rectangles(
@@ -56,7 +56,7 @@ def main_with_export():
         os.path.join(workspace_dir, "config", "assets", "nailong", "1.obj"),
         material_type=JELLY,
         particle_density=0.03,
-        translation=(0.0, 0.0, 0.4)
+        translation=(0.0, 0.0, 0.5)
     )
 
     # Define material export configurations
@@ -69,7 +69,7 @@ def main_with_export():
         },
         {
             'name': 'jelly1',
-            'particle_range': (60000, 90000),
+            'particle_range': (60000, 100000),
             'material_type': JELLY
         }
     ]
@@ -90,7 +90,7 @@ def main_with_export():
     
     # Simulation parameters
     substeps_per_frame = 20
-    max_frames = 400
+    max_frames = 4000
     
     gui = ti.GUI("MPM3D", background_color=0x112F41)
     

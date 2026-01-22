@@ -74,8 +74,8 @@ class TaichiSolverAdapter:
         spacing = float(liquid_box.particle_spacing)
         smoothing_length = float(liquid_box.smoothing_length)
         particle_mass = liquid_box.rest_density * spacing ** 3
-        domain_min = (-1.5, -1.5, -1.5)
-        domain_max = (1.5, 1.5, 2.5)
+        domain_min = (-1.5, -1.5, -0.5)
+        domain_max = (1.5, 1.5, 4.5)
         domain_size = (domain_max[0] - domain_min[0], domain_max[1] - domain_min[1], domain_max[2] - domain_min[2])
         
         self.taichi_solver = TaichiWCSPHSolver(
