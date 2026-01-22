@@ -91,7 +91,7 @@ def main_with_export():
     
     # Simulation parameters
     substeps_per_frame = 20
-    max_frames = 960
+    max_frames = 300
     
     gui = ti.GUI("MPM3D", background_color=0x112F41)
     

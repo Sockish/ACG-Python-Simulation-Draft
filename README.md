@@ -56,6 +56,7 @@ Run Material Point Method simulations for different materials:
 ```bash
 python mpm_instances/simulate_mpm4.py
 ```
+This will create a folder `config/outputs_xxxxx/` with simulation results inside. Later use this folder for rendering.
 
 ## Advanced Workflow
 
@@ -77,7 +78,7 @@ Choose your solver based on needs:
 python scripts/simulate.py --use-taichi --steps 1000
 
 # MPM for elastic/plastic materials
-python ./mpm_instances/simulate_mpm1.py
+python ./mpm_instances/simulate_mpm2.py
 ```
 
 ### 3. Surface Reconstruction (skip if using mpm solver)
@@ -89,8 +90,14 @@ python scripts/reconstruct.py --config config/scene_config.yaml --target-fps 60
 
 
 ### 4. Render with Blender
+First, ensure Blender is installed and accessible via command line.
+Adjust the path to your Blender executable if necessary: (in `scripts/render_single.py`)
+```python
+BLENDER_PATH = r'/root/SPH/blender-4.2.0-linux-x64/blender'
+```
 
-Render frames using Blender scenes:
+Then,
+Render frames using Blender scenes, choose your outputs_dir from the folder generated in simulation step:
 ```bash
 # Single scene rendering (recommended)
 python scripts/render_single.py --scene_file dambreak.blend --input_dir config/outputs_dambreak/show_frames
