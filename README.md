@@ -163,7 +163,7 @@ python scripts/reconstruct.py --config config/scene_config.yaml --target-fps 60
 # 3. Render with Blender
 python scripts/render_single.py --scene_file dambreak.blend --input_dir config/outputs/show_frames
 
-# 4                . Create video
+# 4. Create video
 ffmpeg -framerate 60 -i config/outputs/renders/%05d.png -c:v libx264 -pix_fmt yuv420p final_output.mp4
 ```
 
@@ -172,3 +172,4 @@ ffmpeg -framerate 60 -i config/outputs/renders/%05d.png -c:v libx264 -pix_fmt yu
 This project uses:
 - [Taichi](https://github.com/taichi-dev/taichi) for GPU acceleration
 - [Splashsurf](https://github.com/InteractiveComputerGraphics/splashsurf) for surface reconstruction
+
