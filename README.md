@@ -2,6 +2,9 @@
 
 A Python-based physics simulation framework for SPH (Smoothed Particle Hydrodynamics) and MPM (Material Point Method) simulations with rigid body interactions. The project supports both CPU and GPU-accelerated computations using Taichi.
 
+## Demos link
+- [bilibili Demo Video](https://www.bilibili.com/video/BV1DsvCBZEtg/)
+
 ## Features
 
 - **Multiple Solver Options**:
