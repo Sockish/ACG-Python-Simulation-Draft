@@ -68,7 +68,7 @@ Edit `config/scene_config.yaml` to customize:
 - Rigid/static body meshes
 - Import/export directories
 
-MPM solver does not support customized configuration
+MPM solver used provided scripts in `mpm_instances/` instead. We create 6 scripts for different scenarios. You can modify those scripts directly for different scenarios. For example, you can add new rigid bodies by loading meshes in the script. Adjust max_frames variable to control simulation length, etc.
 
 ### 2. Run Simulation
 
@@ -94,6 +94,8 @@ First, ensure Blender is installed and accessible via command line.
 Adjust the path to your Blender executable if necessary: (in `scripts/render_single.py`)
 ```python
 BLENDER_PATH = r'/root/SPH/blender-4.2.0-linux-x64/blender'
+# For Windows example:
+BLENDER_PATH = r'C:\Program Files\Blender Foundation\Blender 4.5\blender.exe'
 ```
 
 Then,
